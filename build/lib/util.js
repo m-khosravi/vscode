@@ -280,9 +280,11 @@ exports.downloadExtensions = function(extensions) {
 
 exports.getVersion = function (root) {
 	var version = process.env['BUILD_SOURCEVERSION'];
+	console.log('got version', version);
 
 	if (!version || !/^[0-9a-f]{40}$/i.test(version)) {
 		version = git.getVersion(root);
+		console.log('version is bad, now got this one', version);
 	}
 
 	return version;
