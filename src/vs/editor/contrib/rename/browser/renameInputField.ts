@@ -6,13 +6,15 @@
 'use strict';
 
 import 'vs/css!./renameInputField';
-import {localize} from 'vs/nls';
-import {canceled} from 'vs/base/common/errors';
-import {IDisposable, dispose} from 'vs/base/common/lifecycle';
-import {TPromise} from 'vs/base/common/winjs.base';
-import {Range} from 'vs/editor/common/core/range';
-import {IPosition, IRange} from 'vs/editor/common/editorCommon';
-import {ContentWidgetPositionPreference, ICodeEditor, IContentWidget, IContentWidgetPosition} from 'vs/editor/browser/editorBrowser';
+import { localize } from 'vs/nls';
+import { canceled } from 'vs/base/common/errors';
+import { IDisposable, dispose } from 'vs/base/common/lifecycle';
+import { TPromise } from 'vs/base/common/winjs.base';
+import { Range } from 'vs/editor/common/core/range';
+import { IPosition, IRange } from 'vs/editor/common/editorCommon';
+import { ContentWidgetPositionPreference, ICodeEditor, IContentWidget, IContentWidgetPosition } from 'vs/editor/browser/editorBrowser';
+import { IThemeService, ITheme } from "vs/platform/theme/common/themeService";
+import { inputBackground, inputBorder, inputForeground } from "vs/platform/theme/common/colorRegistry";
 
 export default class RenameInputField implements IContentWidget, IDisposable {
 
@@ -21,16 +23,30 @@ export default class RenameInputField implements IContentWidget, IDisposable {
 	private _domNode: HTMLElement;
 	private _inputField: HTMLInputElement;
 	private _visible: boolean;
+	private _disposables: IDisposable[] = [];
 
 	// Editor.IContentWidget.allowEditorOverflow
 	public allowEditorOverflow: boolean = true;
 
-	constructor(editor: ICodeEditor) {
+	constructor(editor: ICodeEditor, @IThemeService private themeService: IThemeService) {
 		this._editor = editor;
 		this._editor.addContentWidget(this);
+
+		this._disposables.push(editor.onDidChangeConfiguration(e => {
+			if (e.fontInfo) {
+				this.updateFont();
+			}
+		}));
+
+		this._disposables.push(themeService.onThemeChange(theme => this.onThemeChange(theme)));
+	}
+
+	private onThemeChange(theme: ITheme): void {
+		this.updateStyles(theme);
 	}
 
 	public dispose(): void {
+		this._disposables = dispose(this._disposables);
 		this._editor.removeContentWidget(this);
 	}
 
@@ -48,8 +64,39 @@ export default class RenameInputField implements IContentWidget, IDisposable {
 			this._domNode.style.height = `${this._editor.getConfiguration().lineHeight}px`;
 			this._domNode.className = 'monaco-editor rename-box';
 			this._domNode.appendChild(this._inputField);
+
+			this.updateFont();
+			this.updateStyles(this.themeService.getTheme());
 		}
 		return this._domNode;
+	}
+
+	private updateStyles(theme: ITheme): void {
+		if (!this._inputField) {
+			return;
+		}
+
+		const background = theme.getColor(inputBackground);
+		const foreground = theme.getColor(inputForeground);
+		const border = theme.getColor(inputBorder);
+
+		this._inputField.style.backgroundColor = background ? background.toString() : null;
+		this._inputField.style.color = foreground ? foreground.toString() : null;
+
+		this._inputField.style.borderWidth = border ? '1px' : null;
+		this._inputField.style.borderStyle = border ? 'solid' : null;
+		this._inputField.style.borderColor = border ? border.toString() : null;
+	}
+
+	private updateFont(): void {
+		if (!this._inputField) {
+			return;
+		}
+
+		const fontInfo = this._editor.getConfiguration().fontInfo;
+		this._inputField.style.fontFamily = fontInfo.fontFamily;
+		this._inputField.style.fontWeight = fontInfo.fontWeight;
+		this._inputField.style.fontSize = `${fontInfo.fontSize}px`;
 	}
 
 	public getPosition(): IContentWidgetPosition {
@@ -116,8 +163,8 @@ export default class RenameInputField implements IContentWidget, IDisposable {
 				}
 			};
 
-			disposeOnDone.push(this._editor.onDidCursorSelectionChange(onCursorChanged));
-			disposeOnDone.push(this._editor.onDidEditorBlur(this._currentCancelInput));
+			disposeOnDone.push(this._editor.onDidChangeCursorSelection(onCursorChanged));
+			disposeOnDone.push(this._editor.onDidBlurEditor(this._currentCancelInput));
 
 			this._show();
 

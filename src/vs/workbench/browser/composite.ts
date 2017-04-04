@@ -3,23 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import {TPromise} from 'vs/base/common/winjs.base';
-import {Dimension, Builder} from 'vs/base/browser/builder';
-import {IAction, IActionRunner, ActionRunner} from 'vs/base/common/actions';
-import {IActionItem} from 'vs/base/browser/ui/actionbar/actionbar';
-import {WorkbenchComponent} from 'vs/workbench/common/component';
-import {CompositeEvent} from 'vs/workbench/common/events';
-import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
-import {AsyncDescriptor} from 'vs/platform/instantiation/common/descriptors';
-import {IComposite} from 'vs/workbench/common/composite';
-import {IEditorControl} from 'vs/platform/editor/common/editor';
-
-/**
- * Internal composite events to communicate with composite container.
- */
-export const EventType = {
-	INTERNAL_COMPOSITE_TITLE_AREA_UPDATE: 'internalCompositeTitleAreaUpdate'
-};
+import { TPromise } from 'vs/base/common/winjs.base';
+import { Dimension, Builder } from 'vs/base/browser/builder';
+import { IAction, IActionRunner, ActionRunner } from 'vs/base/common/actions';
+import { IActionItem } from 'vs/base/browser/ui/actionbar/actionbar';
+import { Component } from 'vs/workbench/common/component';
+import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
+import { AsyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
+import { IComposite } from 'vs/workbench/common/composite';
+import { IEditorControl } from 'vs/platform/editor/common/editor';
+import Event, { Emitter } from 'vs/base/common/event';
+import { IThemeService } from 'vs/platform/theme/common/themeService';
 
 /**
  * Composites are layed out in the sidebar and panel part of the workbench. At a time only one composite
@@ -31,32 +25,38 @@ export const EventType = {
  * layout(), focus(), dispose(). During use of the workbench, a composite will often receive a setVisible,
  * layout and focus call, but only one create and dispose call.
  */
-export abstract class Composite extends WorkbenchComponent implements IComposite {
+export abstract class Composite extends Component implements IComposite {
 	private _telemetryData: any = {};
 	private visible: boolean;
 	private parent: Builder;
+	private _onTitleAreaUpdate: Emitter<void>;
 
 	protected actionRunner: IActionRunner;
 
 	/**
 	 * Create a new composite with the given ID and context.
 	 */
-	constructor(id: string, @ITelemetryService private _telemetryService: ITelemetryService) {
-		super(id);
+	constructor(
+		id: string,
+		private _telemetryService: ITelemetryService,
+		themeService: IThemeService
+	) {
+		super(id, themeService);
 
 		this.visible = false;
+		this._onTitleAreaUpdate = new Emitter<void>();
 	}
 
 	public getTitle(): string {
 		return null;
 	}
 
-	public get telemetryService(): ITelemetryService {
+	protected get telemetryService(): ITelemetryService {
 		return this._telemetryService;
 	}
 
-	public get telemetryData(): any {
-		return this._telemetryData;
+	public get onTitleAreaUpdate(): Event<void> {
+		return this._onTitleAreaUpdate.event;
 	}
 
 	/**
@@ -72,6 +72,10 @@ export abstract class Composite extends WorkbenchComponent implements IComposite
 		this.parent = parent;
 
 		return TPromise.as(null);
+	}
+
+	public updateStyles(): void {
+		super.updateStyles();
 	}
 
 	/**
@@ -100,6 +104,12 @@ export abstract class Composite extends WorkbenchComponent implements IComposite
 		if (visible) {
 			this._telemetryData = {};
 			this._telemetryData.startTime = new Date();
+
+			// Only submit telemetry data when not running from an integration test
+			if (this._telemetryService && this._telemetryService.publicLog) {
+				const eventName: string = 'compositeOpen';
+				this._telemetryService.publicLog(eventName, { composite: this.getId() });
+			}
 		}
 
 		// Send telemetry data when composite hides
@@ -109,7 +119,7 @@ export abstract class Composite extends WorkbenchComponent implements IComposite
 
 			// Only submit telemetry data when not running from an integration test
 			if (this._telemetryService && this._telemetryService.publicLog) {
-				let eventName: string = 'compositeShown';
+				const eventName: string = 'compositeShown';
 				this._telemetryData.composite = this.getId();
 				this._telemetryService.publicLog(eventName, this._telemetryData);
 			}
@@ -174,7 +184,7 @@ export abstract class Composite extends WorkbenchComponent implements IComposite
 	 * gets visible.
 	 */
 	protected updateTitleArea(): void {
-		this.emit(EventType.INTERNAL_COMPOSITE_TITLE_AREA_UPDATE, new CompositeEvent(this.getId()));
+		this._onTitleAreaUpdate.fire();
 	}
 
 	/**
@@ -189,6 +199,12 @@ export abstract class Composite extends WorkbenchComponent implements IComposite
 	 */
 	public getControl(): IEditorControl {
 		return null;
+	}
+
+	public dispose(): void {
+		this._onTitleAreaUpdate.dispose();
+
+		super.dispose();
 	}
 }
 
@@ -212,10 +228,10 @@ export abstract class CompositeDescriptor<T extends Composite> extends AsyncDesc
 }
 
 export abstract class CompositeRegistry<T extends Composite> {
-	private composits: CompositeDescriptor<T>[];
+	private composites: CompositeDescriptor<T>[];
 
 	constructor() {
-		this.composits = [];
+		this.composites = [];
 	}
 
 	protected registerComposite(descriptor: CompositeDescriptor<T>): void {
@@ -223,25 +239,25 @@ export abstract class CompositeRegistry<T extends Composite> {
 			return;
 		}
 
-		this.composits.push(descriptor);
+		this.composites.push(descriptor);
 	}
 
 	public getComposite(id: string): CompositeDescriptor<T> {
 		return this.compositeById(id);
 	}
 
-	protected getComposits(): CompositeDescriptor<T>[] {
-		return this.composits.slice(0);
+	protected getComposites(): CompositeDescriptor<T>[] {
+		return this.composites.slice(0);
 	}
 
-	protected setComposits(compositsToSet: CompositeDescriptor<T>[]): void {
-		this.composits = compositsToSet;
+	protected setComposites(compositesToSet: CompositeDescriptor<T>[]): void {
+		this.composites = compositesToSet;
 	}
 
 	private compositeById(id: string): CompositeDescriptor<T> {
-		for (let i = 0; i < this.composits.length; i++) {
-			if (this.composits[i].id === id) {
-				return this.composits[i];
+		for (let i = 0; i < this.composites.length; i++) {
+			if (this.composites[i].id === id) {
+				return this.composites[i];
 			}
 		}
 

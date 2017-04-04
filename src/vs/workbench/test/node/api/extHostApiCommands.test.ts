@@ -6,35 +6,40 @@
 'use strict';
 
 import * as assert from 'assert';
-import {setUnexpectedErrorHandler, errorHandler} from 'vs/base/common/errors';
+import { setUnexpectedErrorHandler, errorHandler } from 'vs/base/common/errors';
+import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
 import URI from 'vs/base/common/uri';
-import {TPromise} from 'vs/base/common/winjs.base';
+import { TPromise } from 'vs/base/common/winjs.base';
 import * as types from 'vs/workbench/api/node/extHostTypes';
 import * as EditorCommon from 'vs/editor/common/editorCommon';
-import {Model as EditorModel} from 'vs/editor/common/model/model';
-import {TestThreadService} from './testThreadService';
-import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
-import {InstantiationService} from 'vs/platform/instantiation/common/instantiationService';
-import {MainProcessMarkerService} from 'vs/platform/markers/common/markerService';
-import {IMarkerService} from 'vs/platform/markers/common/markers';
-import {IThreadService} from 'vs/platform/thread/common/thread';
-import {IKeybindingService} from 'vs/platform/keybinding/common/keybindingService';
-import {KeybindingsRegistry} from 'vs/platform/keybinding/common/keybindingsRegistry';
-import {IModelService} from 'vs/editor/common/services/modelService';
-import {ExtHostLanguageFeatures, MainThreadLanguageFeatures} from 'vs/workbench/api/node/extHostLanguageFeatures';
-import {registerApiCommands} from 'vs/workbench/api/node/extHostApiCommands';
-import {ExtHostCommands, MainThreadCommands} from 'vs/workbench/api/node/extHostCommands';
-import {ExtHostModelService} from 'vs/workbench/api/node/extHostDocuments';
-import * as ExtHostTypeConverters from 'vs/workbench/api/node/extHostTypeConverters';
+import { Model as EditorModel } from 'vs/editor/common/model/model';
+import { TestThreadService } from 'vs/workbench/test/node/api/testThreadService';
+import { MarkerService } from 'vs/platform/markers/common/markerService';
+import { IMarkerService } from 'vs/platform/markers/common/markers';
+import { IThreadService } from 'vs/workbench/services/thread/common/threadService';
+import { ICommandService, CommandsRegistry } from 'vs/platform/commands/common/commands';
+import { IModelService } from 'vs/editor/common/services/modelService';
+import { ExtHostLanguageFeatures } from 'vs/workbench/api/node/extHostLanguageFeatures';
+import { MainThreadLanguageFeatures } from 'vs/workbench/api/node/mainThreadLanguageFeatures';
+import { IHeapService } from 'vs/workbench/api/node/mainThreadHeapService';
+import { ExtHostApiCommands } from 'vs/workbench/api/node/extHostApiCommands';
+import { ExtHostCommands } from 'vs/workbench/api/node/extHostCommands';
+import { ExtHostHeapService } from 'vs/workbench/api/node/extHostHeapService';
+import { MainThreadCommands } from 'vs/workbench/api/node/mainThreadCommands';
+import { ExtHostDocuments } from 'vs/workbench/api/node/extHostDocuments';
+import { ExtHostDocumentsAndEditors } from 'vs/workbench/api/node/extHostDocumentsAndEditors';
+import { MainContext, ExtHostContext } from 'vs/workbench/api/node/extHost.protocol';
+import { ExtHostDiagnostics } from 'vs/workbench/api/node/extHostDiagnostics';
+import * as vscode from 'vscode';
 
 const defaultSelector = { scheme: 'far' };
-const model: EditorCommon.IModel = new EditorModel(
+const model: EditorCommon.IModel = EditorModel.createFromString(
 	[
 		'This is the first line',
 		'This is the second line',
 		'This is the third line',
 	].join('\n'),
-	EditorModel.DEFAULT_CREATION_OPTIONS,
+	undefined,
 	undefined,
 	URI.parse('far://testing/file.b'));
 
@@ -45,29 +50,37 @@ let commands: ExtHostCommands;
 let disposables: vscode.Disposable[] = [];
 let originalErrorHandler: (e: any) => any;
 
-suite('ExtHostLanguageFeatureCommands', function() {
+suite('ExtHostLanguageFeatureCommands', function () {
 
 	suiteSetup((done) => {
 
 		originalErrorHandler = errorHandler.getUnexpectedErrorHandler();
 		setUnexpectedErrorHandler(() => { });
 
-		let services = new ServiceCollection();
-		let instantiationService = new InstantiationService(services);
-		threadService = new TestThreadService(instantiationService);
-
-		services.set(IKeybindingService, <IKeybindingService>{
+		let instantiationService = new TestInstantiationService();
+		threadService = new TestThreadService();
+		instantiationService.stub(IHeapService, {
+			_serviceBrand: undefined,
+			trackRecursive(args) {
+				// nothing
+				return args;
+			}
+		});
+		instantiationService.stub(ICommandService, {
+			_serviceBrand: undefined,
 			executeCommand(id, args): any {
-				let handler = KeybindingsRegistry.getCommands()[id];
+				let { handler } = CommandsRegistry.getCommands()[id];
 				return TPromise.as(instantiationService.invokeFunction(handler, args));
 			}
 		});
-		services.set(IMarkerService, new MainProcessMarkerService(threadService));
-		services.set(IThreadService, threadService);
-		services.set(IModelService, <IModelService>{
-			serviceId: IModelService,
+		instantiationService.stub(IMarkerService, new MarkerService());
+		instantiationService.stub(IThreadService, threadService);
+		instantiationService.stub(IModelService, <IModelService>{
+			_serviceBrand: IModelService,
 			getModel(): any { return model; },
 			createModel(): any { throw new Error(); },
+			updateModel(): any { throw new Error(); },
+			setMode(): any { throw new Error(); },
 			destroyModel(): any { throw new Error(); },
 			getModels(): any { throw new Error(); },
 			onModelAdded: undefined,
@@ -76,32 +89,34 @@ suite('ExtHostLanguageFeatureCommands', function() {
 			getCreationOptions(): any { throw new Error(); }
 		});
 
-		threadService.getRemotable(ExtHostModelService)._acceptModelAdd({
-			isDirty: false,
-			versionId: model.getVersionId(),
-			modeId: model.getModeId(),
-			url: model.uri,
-			value: {
-				EOL: model.getEOL(),
+		const extHostDocumentsAndEditors = new ExtHostDocumentsAndEditors(threadService);
+		extHostDocumentsAndEditors.$acceptDocumentsAndEditorsDelta({
+			addedDocuments: [{
+				isDirty: false,
+				versionId: model.getVersionId(),
+				modeId: model.getLanguageIdentifier().language,
+				url: model.uri,
 				lines: model.getValue().split(model.getEOL()),
-				BOM: '',
-				length: -1,
-				options: {
-					tabSize: 4,
-					insertSpaces: true,
-					trimAutoWhitespace: true,
-					defaultEOL: EditorCommon.DefaultEndOfLine.LF
-				}
-			},
+				EOL: model.getEOL(),
+			}]
 		});
+		const extHostDocuments = new ExtHostDocuments(threadService, extHostDocumentsAndEditors);
+		threadService.set(ExtHostContext.ExtHostDocuments, extHostDocuments);
 
-		threadService.getRemotable(MainThreadCommands);
-		commands = threadService.getRemotable(ExtHostCommands);
-		ExtHostTypeConverters.Command.initialize(commands);
+		const heapService = new ExtHostHeapService();
 
-		registerApiCommands(threadService);
-		mainThread = threadService.getRemotable(MainThreadLanguageFeatures);
-		extHost = threadService.getRemotable(ExtHostLanguageFeatures);
+		commands = new ExtHostCommands(threadService, heapService);
+		threadService.set(ExtHostContext.ExtHostCommands, commands);
+		threadService.setTestInstance(MainContext.MainThreadCommands, instantiationService.createInstance(MainThreadCommands));
+		ExtHostApiCommands.register(commands);
+
+		const diagnostics = new ExtHostDiagnostics(threadService);
+		threadService.set(ExtHostContext.ExtHostDiagnostics, diagnostics);
+
+		extHost = new ExtHostLanguageFeatures(threadService, extHostDocuments, commands, heapService, diagnostics);
+		threadService.set(ExtHostContext.ExtHostLanguageFeatures, extHost);
+
+		mainThread = threadService.setTestInstance(MainContext.MainThreadLanguageFeatures, instantiationService.createInstance(MainThreadLanguageFeatures));
 
 		threadService.sync().then(done, done);
 	});
@@ -111,7 +126,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 		model.dispose();
 	});
 
-	teardown(function(done) {
+	teardown(function (done) {
 		while (disposables.length) {
 			disposables.pop().dispose();
 		}
@@ -121,7 +136,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 
 	// --- workspace symbols
 
-	test('WorkspaceSymbols, invalid arguments', function(done) {
+	test('WorkspaceSymbols, invalid arguments', function (done) {
 		let promises = [
 			commands.executeCommand('vscode.executeWorkspaceSymbolProvider'),
 			commands.executeCommand('vscode.executeWorkspaceSymbolProvider', null),
@@ -138,7 +153,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 		// });
 	});
 
-	test('WorkspaceSymbols, back and forth', function(done) {
+	test('WorkspaceSymbols, back and forth', function (done) {
 
 		disposables.push(extHost.registerWorkspaceSymbolProvider(<vscode.WorkspaceSymbolProvider>{
 			provideWorkspaceSymbols(query): any {
@@ -174,7 +189,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 
 	// --- definition
 
-	test('Definition, invalid arguments', function(done) {
+	test('Definition, invalid arguments', function (done) {
 		let promises = [
 			commands.executeCommand('vscode.executeDefinitionProvider'),
 			commands.executeCommand('vscode.executeDefinitionProvider', null),
@@ -191,7 +206,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 		// });
 	});
 
-	test('Definition, back and forth', function() {
+	test('Definition, back and forth', function () {
 
 		disposables.push(extHost.registerDefinitionProvider(defaultSelector, <vscode.DefinitionProvider>{
 			provideDefinition(doc: any): any {
@@ -244,7 +259,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 
 	// --- outline
 
-	test('Outline, back and forth', function(done) {
+	test('Outline, back and forth', function (done) {
 		disposables.push(extHost.registerDocumentSymbolProvider(defaultSelector, <vscode.DocumentSymbolProvider>{
 			provideDocumentSymbols(): any {
 				return [
@@ -267,7 +282,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 
 	// --- suggest
 
-	test('Suggest, back and forth', function(done) {
+	test('Suggest, back and forth', function () {
 		disposables.push(extHost.registerCompletionItemProvider(defaultSelector, <vscode.CompletionItemProvider>{
 			provideCompletionItems(doc, pos): any {
 				let a = new types.CompletionItem('item1');
@@ -275,61 +290,62 @@ suite('ExtHostLanguageFeatureCommands', function() {
 				b.textEdit = types.TextEdit.replace(new types.Range(0, 4, 0, 8), 'foo'); // overwite after
 				let c = new types.CompletionItem('item3');
 				c.textEdit = types.TextEdit.replace(new types.Range(0, 1, 0, 6), 'foobar'); // overwite before & after
+
+				// snippet string!
 				let d = new types.CompletionItem('item4');
-				d.textEdit = types.TextEdit.replace(new types.Range(0, 1, 0, 4), ''); // overwite before
+				d.range = new types.Range(0, 1, 0, 4);// overwite before
+				d.insertText = new types.SnippetString('foo$0bar');
 				return [a, b, c, d];
 			}
 		}, []));
 
-		threadService.sync().then(() => {
-			commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', model.uri, new types.Position(0, 4)).then(list => {
-				try {
-					assert.ok(list instanceof types.CompletionList);
-					let values = list.items;
-					assert.ok(Array.isArray(values));
-					assert.equal(values.length, 4);
-					let [first, second, third, forth] = values;
-					assert.equal(first.label, 'item1');
-					assert.equal(first.textEdit.newText, 'item1');
-					assert.equal(first.textEdit.range.start.line, 0);
-					assert.equal(first.textEdit.range.start.character, 0);
-					assert.equal(first.textEdit.range.end.line, 0);
-					assert.equal(first.textEdit.range.end.character, 4);
+		return threadService.sync().then(() => {
+			return commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', model.uri, new types.Position(0, 4)).then(list => {
 
-					assert.equal(second.label, 'item2');
-					assert.equal(second.textEdit.newText, 'foo');
-					assert.equal(second.textEdit.range.start.line, 0);
-					assert.equal(second.textEdit.range.start.character, 4);
-					assert.equal(second.textEdit.range.end.line, 0);
-					assert.equal(second.textEdit.range.end.character, 8);
+				assert.ok(list instanceof types.CompletionList);
+				let values = list.items;
+				assert.ok(Array.isArray(values));
+				assert.equal(values.length, 4);
+				let [first, second, third, fourth] = values;
+				assert.equal(first.label, 'item1');
+				assert.equal(first.textEdit.newText, 'item1');
+				assert.equal(first.textEdit.range.start.line, 0);
+				assert.equal(first.textEdit.range.start.character, 0);
+				assert.equal(first.textEdit.range.end.line, 0);
+				assert.equal(first.textEdit.range.end.character, 4);
 
-					assert.equal(third.label, 'item3');
-					assert.equal(third.textEdit.newText, 'foobar');
-					assert.equal(third.textEdit.range.start.line, 0);
-					assert.equal(third.textEdit.range.start.character, 1);
-					assert.equal(third.textEdit.range.end.line, 0);
-					assert.equal(third.textEdit.range.end.character, 6);
+				assert.equal(second.label, 'item2');
+				assert.equal(second.textEdit.newText, 'foo');
+				assert.equal(second.textEdit.range.start.line, 0);
+				assert.equal(second.textEdit.range.start.character, 4);
+				assert.equal(second.textEdit.range.end.line, 0);
+				assert.equal(second.textEdit.range.end.character, 8);
 
-					assert.equal(forth.label, 'item4');
-					assert.equal(forth.textEdit.newText, '');
-					assert.equal(forth.textEdit.range.start.line, 0);
-					assert.equal(forth.textEdit.range.start.character, 1);
-					assert.equal(forth.textEdit.range.end.line, 0);
-					assert.equal(forth.textEdit.range.end.character, 4);
-					done();
-				} catch (e) {
-					done(e);
-				}
-			}, done);
-		}, done);
+				assert.equal(third.label, 'item3');
+				assert.equal(third.textEdit.newText, 'foobar');
+				assert.equal(third.textEdit.range.start.line, 0);
+				assert.equal(third.textEdit.range.start.character, 1);
+				assert.equal(third.textEdit.range.end.line, 0);
+				assert.equal(third.textEdit.range.end.character, 6);
+
+				assert.equal(fourth.label, 'item4');
+				assert.equal(fourth.textEdit, undefined);
+				assert.equal(fourth.range.start.line, 0);
+				assert.equal(fourth.range.start.character, 1);
+				assert.equal(fourth.range.end.line, 0);
+				assert.equal(fourth.range.end.character, 4);
+				assert.ok(fourth.insertText instanceof types.SnippetString);
+				assert.equal((<types.SnippetString>fourth.insertText).value, 'foo$0bar');
+			});
+		});
 	});
 
-	test('Suggest, return CompletionList !array', function(done) {
+	test('Suggest, return CompletionList !array', function (done) {
 		disposables.push(extHost.registerCompletionItemProvider(defaultSelector, <vscode.CompletionItemProvider>{
 			provideCompletionItems(): any {
 				let a = new types.CompletionItem('item1');
 				let b = new types.CompletionItem('item2');
-				return new types.CompletionList(<any> [a,b], true);
+				return new types.CompletionList(<any>[a, b], true);
 			}
 		}, []));
 
@@ -344,7 +360,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 
 	// --- quickfix
 
-	test('QuickFix, back and forth', function() {
+	test('QuickFix, back and forth', function () {
 		disposables.push(extHost.registerCodeActionProvider(defaultSelector, <vscode.CodeActionProvider>{
 			provideCodeActions(): any {
 				return [{ command: 'testing', title: 'Title', arguments: [1, 2, true] }];
@@ -364,7 +380,7 @@ suite('ExtHostLanguageFeatureCommands', function() {
 
 	// --- code lens
 
-	test('CodeLens, back and forth', function() {
+	test('CodeLens, back and forth', function () {
 
 		const complexArg = {
 			foo() { },
@@ -388,6 +404,28 @@ suite('ExtHostLanguageFeatureCommands', function() {
 				assert.equal(first.command.arguments[0], 1);
 				assert.equal(first.command.arguments[1], true);
 				assert.equal(first.command.arguments[2], complexArg);
+			});
+		});
+	});
+
+	test('Links, back and forth', function () {
+
+		disposables.push(extHost.registerDocumentLinkProvider(defaultSelector, <vscode.DocumentLinkProvider>{
+			provideDocumentLinks(): any {
+				return [new types.DocumentLink(new types.Range(0, 0, 0, 20), URI.parse('foo:bar'))];
+			}
+		}));
+
+		return threadService.sync().then(() => {
+			return commands.executeCommand<vscode.DocumentLink[]>('vscode.executeLinkProvider', model.uri).then(value => {
+				assert.equal(value.length, 1);
+				let [first] = value;
+
+				assert.equal(first.target.toString(), 'foo:bar');
+				assert.equal(first.range.start.line, 0);
+				assert.equal(first.range.start.character, 0);
+				assert.equal(first.range.end.line, 0);
+				assert.equal(first.range.end.character, 20);
 			});
 		});
 	});

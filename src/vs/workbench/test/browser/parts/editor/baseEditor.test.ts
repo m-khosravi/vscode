@@ -6,22 +6,26 @@
 'use strict';
 
 import * as assert from 'assert';
-import {BaseEditor, EditorInputAction, EditorInputActionContributor, EditorDescriptor, Extensions, IEditorRegistry, IEditorInputFactory} from 'vs/workbench/browser/parts/editor/baseEditor';
-import {EditorInput, EditorOptions} from 'vs/workbench/common/editor';
-import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
-import {InstantiationService} from 'vs/platform/instantiation/common/instantiationService';
+import { BaseEditor, EditorInputAction, EditorInputActionContributor, EditorDescriptor } from 'vs/workbench/browser/parts/editor/baseEditor';
+import { EditorInput, EditorOptions, Extensions, IEditorRegistry, IEditorInputFactory } from 'vs/workbench/common/editor';
+import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import * as Platform from 'vs/platform/platform';
-import {SyncDescriptor} from 'vs/platform/instantiation/common/descriptors';
-import {StringEditorInput} from 'vs/workbench/common/editor/stringEditorInput';
-import {ITelemetryService, NullTelemetryService} from 'vs/platform/telemetry/common/telemetry';
-import mime = require('vs/base/common/mime');
+import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
+import { StringEditorInput } from 'vs/workbench/common/editor/stringEditorInput';
+import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
+import { NullTelemetryService } from 'vs/platform/telemetry/common/telemetryUtils';
+import { PLAINTEXT_MODE_ID } from 'vs/editor/common/modes/modesRegistry';
+import { workbenchInstantiationService, TestThemeService } from 'vs/workbench/test/workbenchTestServices';
+
+const NullThemeService = new TestThemeService();
 
 let EditorRegistry: IEditorRegistry = Platform.Registry.as(Extensions.Editors);
 
 export class MyEditor extends BaseEditor {
 
 	constructor(id: string, @ITelemetryService telemetryService: ITelemetryService) {
-		super(id, telemetryService);
+		super(id, NullTelemetryService, NullThemeService);
 	}
 
 	getId(): string {
@@ -40,7 +44,7 @@ export class MyEditor extends BaseEditor {
 export class MyOtherEditor extends BaseEditor {
 
 	constructor(id: string, @ITelemetryService telemetryService: ITelemetryService) {
-		super(id, telemetryService);
+		super(id, NullTelemetryService, NullThemeService);
 	}
 
 	getId(): string {
@@ -72,7 +76,7 @@ class MyInput extends EditorInput {
 		return ids[1];
 	}
 
-	public getId(): string {
+	public getTypeId(): string {
 		return '';
 	}
 
@@ -82,7 +86,7 @@ class MyInput extends EditorInput {
 }
 
 class MyOtherInput extends EditorInput {
-	public getId(): string {
+	public getTypeId(): string {
 		return '';
 	}
 
@@ -121,9 +125,6 @@ class MyEditorInputActionContributor extends EditorInputActionContributor {
 	}
 }
 
-class MyClass { }
-class MyOtherClass { }
-
 suite('Workbench BaseEditor', () => {
 
 	test('BaseEditor API', function (done) {
@@ -132,26 +133,24 @@ suite('Workbench BaseEditor', () => {
 		let options = new EditorOptions();
 
 		assert(!e.isVisible());
-		assert(!e.getInput());
-		assert(!e.getOptions());
-		e.setInput(input, options).then(function () {
-			assert.strictEqual(input, e.getInput());
-			assert.strictEqual(options, e.getOptions());
+		assert(!e.input);
+		assert(!e.options);
+		e.setInput(input, options).then(() => {
+			assert.strictEqual(input, e.input);
+			assert.strictEqual(options, e.options);
 
-			return e.setVisible(true).then(function () {
-				assert(e.isVisible());
-				input.addListener2('dispose', function () {
-					assert(false);
-				});
-				e.dispose();
-				e.clearInput();
-				return e.setVisible(false).then(function () {
-					assert(!e.isVisible());
-					assert(!e.getInput());
-					assert(!e.getOptions());
-					assert(!e.getControl());
-				});
+			e.setVisible(true);
+			assert(e.isVisible());
+			input.onDispose(() => {
+				assert(false);
 			});
+			e.dispose();
+			e.clearInput();
+			e.setVisible(false);
+			assert(!e.isVisible());
+			assert(!e.input);
+			assert(!e.options);
+			assert(!e.getControl());
 		}).done(() => done());
 	});
 
@@ -192,12 +191,12 @@ suite('Workbench BaseEditor', () => {
 		EditorRegistry.registerEditor(d2, new SyncDescriptor(StringEditorInput));
 		EditorRegistry.registerEditor(d1, new SyncDescriptor(MyStringInput));
 
-		let inst = new InstantiationService();
+		let inst = new TestInstantiationService();
 
-		inst.createInstance(EditorRegistry.getEditor(inst.createInstance(MyStringInput, 'fake', '', '', mime.MIME_TEXT, false)), 'id').then(function (editor) {
+		inst.createInstance(EditorRegistry.getEditor(inst.createInstance(MyStringInput, 'fake', '', '', PLAINTEXT_MODE_ID, false)), 'id').then(editor => {
 			assert.strictEqual(editor.getId(), 'myEditor');
 
-			return inst.createInstance(EditorRegistry.getEditor(inst.createInstance(StringEditorInput, 'fake', '', '', mime.MIME_TEXT, false)), 'id').then(function (editor) {
+			return inst.createInstance(EditorRegistry.getEditor(inst.createInstance(StringEditorInput, 'fake', '', '', PLAINTEXT_MODE_ID, false)), 'id').then(editor => {
 				assert.strictEqual(editor.getId(), 'myOtherEditor');
 
 				(<any>EditorRegistry).setEditors(oldEditors);
@@ -213,9 +212,9 @@ suite('Workbench BaseEditor', () => {
 
 		EditorRegistry.registerEditor(d1, new SyncDescriptor(StringEditorInput));
 
-		let inst = new InstantiationService();
+		let inst = new TestInstantiationService();
 
-		inst.createInstance(EditorRegistry.getEditor(inst.createInstance(MyStringInput, 'fake', '', '', mime.MIME_TEXT, false)), 'id').then(function (editor) {
+		inst.createInstance(EditorRegistry.getEditor(inst.createInstance(MyStringInput, 'fake', '', '', PLAINTEXT_MODE_ID, false)), 'id').then(editor => {
 			assert.strictEqual('myOtherEditor', editor.getId());
 
 			(<any>EditorRegistry).setEditors(oldEditors);
@@ -223,25 +222,25 @@ suite('Workbench BaseEditor', () => {
 	});
 
 	test('Editor Input Action - triggers isEnabled properly', function () {
-		let inst = new InstantiationService();
+		let inst = new TestInstantiationService();
 
 		let action = new MyAction('id', 'label');
-		action.input = inst.createInstance(StringEditorInput, 'input', '', '', mime.MIME_TEXT, false);
+		action.input = inst.createInstance(StringEditorInput, 'input', '', '', PLAINTEXT_MODE_ID, false);
 		assert.equal(action.didCallIsEnabled, true);
 	});
 
 	test('Editor Input Action Contributor', function () {
-		let inst = new InstantiationService();
+		let inst = new TestInstantiationService();
 
 		let contributor = new MyEditorInputActionContributor();
 
 		assert(!contributor.hasActions(null));
-		assert(contributor.hasActions({ editor: new MyEditor('id', NullTelemetryService), input: inst.createInstance(StringEditorInput, 'fake', '', '', mime.MIME_TEXT, false), position: 0 }));
+		assert(contributor.hasActions({ editor: new MyEditor('id', NullTelemetryService), input: inst.createInstance(StringEditorInput, 'fake', '', '', PLAINTEXT_MODE_ID, false), position: 0 }));
 
-		let actionsFirst = contributor.getActions({ editor: new MyEditor('id', NullTelemetryService), input: inst.createInstance(StringEditorInput, 'fake', '', '', mime.MIME_TEXT, false), position: 0 });
+		let actionsFirst = contributor.getActions({ editor: new MyEditor('id', NullTelemetryService), input: inst.createInstance(StringEditorInput, 'fake', '', '', PLAINTEXT_MODE_ID, false), position: 0 });
 		assert.strictEqual(actionsFirst.length, 2);
 
-		let input = inst.createInstance(StringEditorInput, 'fake', '', '', mime.MIME_TEXT, false);
+		let input = inst.createInstance(StringEditorInput, 'fake', '', '', PLAINTEXT_MODE_ID, false);
 		let actions = contributor.getActions({ editor: new MyEditor('id', NullTelemetryService), input: input, position: 0 });
 		assert(actions[0] === actionsFirst[0]);
 		assert(actions[1] === actionsFirst[1]);
@@ -257,7 +256,7 @@ suite('Workbench BaseEditor', () => {
 
 		// other input causes actions to loose input context
 		let myInput = new MyInput();
-		myInput.getId = function () {
+		myInput.getTypeId = function () {
 			return 'foo.id';
 		};
 
@@ -267,7 +266,7 @@ suite('Workbench BaseEditor', () => {
 	});
 
 	test('Editor Input Factory', function () {
-		EditorRegistry.setInstantiationService(new InstantiationService());
+		EditorRegistry.setInstantiationService(workbenchInstantiationService());
 		EditorRegistry.registerEditorInputFactory('myInputId', MyInputFactory);
 
 		let factory = EditorRegistry.getEditorInputFactory('myInputId');

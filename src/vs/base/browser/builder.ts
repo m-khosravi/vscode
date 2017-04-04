@@ -5,9 +5,9 @@
 'use strict';
 
 import 'vs/css!./builder';
-import {TPromise} from 'vs/base/common/winjs.base';
+import { TPromise } from 'vs/base/common/winjs.base';
 import types = require('vs/base/common/types');
-import {IDisposable, dispose} from 'vs/base/common/lifecycle';
+import { IDisposable, dispose } from 'vs/base/common/lifecycle';
 import strings = require('vs/base/common/strings');
 import assert = require('vs/base/common/assert');
 import DOM = require('vs/base/browser/dom');
@@ -183,7 +183,7 @@ export class Builder implements IDisposable {
 		}
 
 		// Wrap Builders into MultiBuilder
-		let builders:Builder[] = [this];
+		let builders: Builder[] = [this];
 		if (obj instanceof MultiBuilder) {
 			for (let i = 0; i < (<MultiBuilder>obj).length; i++) {
 				builders.push((<MultiBuilder>obj).item(i));
@@ -680,7 +680,7 @@ export class Builder implements IDisposable {
 	public preventDefault(type: string, cancelBubble: boolean, listenerToUnbindContainer?: IDisposable[], useCapture?: boolean): Builder;
 	public preventDefault(typesArray: string[], cancelBubble: boolean, listenerToUnbindContainer?: IDisposable[], useCapture?: boolean): Builder;
 	public preventDefault(arg1: any, cancelBubble: boolean, listenerToUnbindContainer?: IDisposable[], useCapture?: boolean): Builder {
-		let fn = function(e: Event) {
+		let fn = function (e: Event) {
 			e.preventDefault();
 
 			if (cancelBubble) {
@@ -692,7 +692,7 @@ export class Builder implements IDisposable {
 			}
 		};
 
-		return this.on(arg1, fn, listenerToUnbindContainer);
+		return this.on(arg1, fn, listenerToUnbindContainer, useCapture);
 	}
 
 	/**
@@ -857,7 +857,8 @@ export class Builder implements IDisposable {
 	 *  a) a single string passed in as argument will return the style value using the
 	 *  string as key from the current element of the builder.
 	 *  b) two strings passed in will set the style value identified by the first
-	 *  parameter to match the second parameter.
+	 *  parameter to match the second parameter. The second parameter can be null
+	 *  to unset a style
 	 *  c) an object literal passed in will apply the properties of the literal as styles
 	 *  to the current element of the builder.
 	 */
@@ -874,15 +875,19 @@ export class Builder implements IDisposable {
 					this.doSetStyle(prop, value);
 				}
 			}
+
+			return this;
 		}
 
+		const hasFirstP = types.isString(firstP);
+
 		// Get Style Value
-		else if (types.isString(firstP) && !types.isString(secondP)) {
+		if (hasFirstP && types.isUndefined(secondP)) {
 			return this.currentElement.style[this.cssKeyToJavaScriptProperty(firstP)];
 		}
 
 		// Set Style Value
-		else if (types.isString(firstP) && types.isString(secondP)) {
+		else if (hasFirstP) {
 			this.doSetStyle(firstP, secondP);
 		}
 
@@ -1280,8 +1285,8 @@ export class Builder implements IDisposable {
 	 *  Shows the current element of the builder.
 	 */
 	public show(): Builder {
-		if (this.hasClass('hidden')) {
-			this.removeClass('hidden');
+		if (this.hasClass('builder-hidden')) {
+			this.removeClass('builder-hidden');
 		}
 
 		this.attr('aria-hidden', 'false');
@@ -1319,8 +1324,8 @@ export class Builder implements IDisposable {
 	 *  Hides the current element of the builder.
 	 */
 	public hide(): Builder {
-		if (!this.hasClass('hidden')) {
-			this.addClass('hidden');
+		if (!this.hasClass('builder-hidden')) {
+			this.addClass('builder-hidden');
 		}
 		this.attr('aria-hidden', 'true');
 
@@ -1334,7 +1339,7 @@ export class Builder implements IDisposable {
 	 *  Returns true if the current element of the builder is hidden.
 	 */
 	public isHidden(): boolean {
-		return this.hasClass('hidden') || this.currentElement.style.display === 'none';
+		return this.hasClass('builder-hidden') || this.currentElement.style.display === 'none';
 	}
 
 	/**
@@ -1345,7 +1350,7 @@ export class Builder implements IDisposable {
 		// Cancel any pending showDelayed() invocation
 		this.cancelVisibilityPromise();
 
-		this.swapClass('builder-visible', 'hidden');
+		this.swapClass('builder-visible', 'builder-hidden');
 
 		if (this.isHidden()) {
 			this.attr('aria-hidden', 'true');
@@ -1625,6 +1630,15 @@ export class Builder implements IDisposable {
 	}
 
 	/**
+	 * Returns a new builder with the child at the given index.
+	 */
+	public child(index = 0): Builder {
+		let children = this.currentElement.children;
+
+		return withElement(<HTMLElement>children.item(index));
+	}
+
+	/**
 	 *  Removes the current HTMLElement from the given builder from this builder if this builders
 	 *  current HTMLElement is the direct parent.
 	 */
@@ -1795,31 +1809,6 @@ export class Builder implements IDisposable {
 	}
 
 	/**
-	 *  Gets the coordinates of the element relative to the specified parent.
-	 */
-	public getPositionRelativeTo(element: HTMLElement): Box;
-	public getPositionRelativeTo(element: Builder): Box;
-	public getPositionRelativeTo(element: any): Box {
-		if (element instanceof Builder) {
-			element = (<Builder>element).getHTMLElement();
-		}
-
-		let left = DOM.getRelativeLeft(this.currentElement, element);
-		let top = DOM.getRelativeTop(this.currentElement, element);
-
-		return new Box(top, -1, -1, left);
-	}
-
-	/**
-	 *  Gets the absolute coordinates of the element.
-	 */
-	public getPosition(): Box {
-		let position = DOM.getTopLeftOffset(this.currentElement);
-
-		return new Box(position.top, -1, -1, position.left);
-	}
-
-	/**
 	 *  Gets the size (in pixels) of an element, including the margin.
 	 */
 	public getTotalSize(): Dimension {
@@ -1844,10 +1833,9 @@ export class Builder implements IDisposable {
 	 */
 	public getClientArea(): Dimension {
 
-		// 0.) Try with DOM getDomNodePosition
+		// 0.) Try with DOM clientWidth / clientHeight
 		if (this.currentElement !== document.body) {
-			let dimensions = DOM.getDomNodePosition(this.currentElement);
-			return new Dimension(dimensions.width, dimensions.height);
+			return new Dimension(this.currentElement.clientWidth, this.currentElement.clientHeight);
 		}
 
 		// 1.) Try innerWidth / innerHeight
@@ -1908,7 +1896,7 @@ export class MultiBuilder extends Builder {
 		// Mixin Builder functions to operate on all builders
 		let $outer = this;
 		let propertyFn = (prop: string) => {
-			(<any>$outer)[prop] = function(): any {
+			(<any>$outer)[prop] = function (): any {
 				let args = Array.prototype.slice.call(arguments);
 
 				let returnValues: any[];
@@ -2119,7 +2107,7 @@ export let Binding = {
 
 let SELECTOR_REGEX = /([\w\-]+)?(#([\w\-]+))?((.([\w\-]+))*)/;
 
-export let $: QuickBuilder = function(arg?: any): Builder {
+export let $: QuickBuilder = function (arg?: any): Builder {
 
 	// Off-DOM use
 	if (types.isUndefined(arg)) {

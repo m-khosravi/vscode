@@ -5,28 +5,26 @@
 'use strict';
 
 import URI from 'vs/base/common/uri';
-import {createDecorator, ServiceIdentifier} from 'vs/platform/instantiation/common/instantiation';
+import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import paths = require('vs/base/common/paths');
+import { isEqualOrParent } from 'vs/platform/files/common/files';
+import { isLinux } from 'vs/base/common/platform';
 
 export const IWorkspaceContextService = createDecorator<IWorkspaceContextService>('contextService');
 
 export interface IWorkspaceContextService {
-	serviceId: ServiceIdentifier<any>;
+	_serviceBrand: any;
+
+	/**
+	 * Returns iff the application was opened with a workspace or not.
+	 */
+	hasWorkspace(): boolean;
 
 	/**
 	 * Provides access to the workspace object the platform is running with. This may be null if the workbench was opened
 	 * without workspace (empty);
 	 */
 	getWorkspace(): IWorkspace;
-
-	/**
-	 * Provides access to the configuration object the platform is running with.
-	 */
-	getConfiguration(): IConfiguration;
-
-	/**
-	 * Provides access to the options object the platform is running with.
-	 */
-	getOptions(): any;
 
 	/**
 	 * Returns iff the provided resource is inside the workspace or not.
@@ -38,7 +36,7 @@ export interface IWorkspaceContextService {
 	 * without leading or trailing slashes. Returns null if the file is not inside an opened
 	 * workspace.
 	 */
-	toWorkspaceRelativePath: (resource: URI) => string;
+	toWorkspaceRelativePath: (resource: URI, toOSPath?: boolean) => string;
 
 	/**
 	 * Given a workspace relative path, returns the resource with the absolute path.
@@ -55,96 +53,57 @@ export interface IWorkspace {
 	resource: URI;
 
 	/**
-	 * the identifier that uniquely identifies this workspace among others.
-	 */
-	id: string;
-
-	/**
-	 * the name of the workspace
-	 */
-	name: string;
-
-	/**
-	 * the last modified date of the workspace if known
-	 */
-	mtime?: number;
-
-	/**
 	 * the unique identifier of the workspace. if the workspace is deleted and recreated
 	 * the identifier also changes. this makes the uid more unique compared to the id which
 	 * is just derived from the workspace name.
 	 */
 	uid?: number;
-}
 
-export interface IConfiguration {
 	/**
-	 * Some environmental flags
+	 * the name of the workspace
 	 */
-	env?: IEnvironment;
+	name?: string;
 }
 
-export interface IEnvironment {
-	appName: string;
-	appRoot: string;
-	isBuilt: boolean;
-	execPath: string;
+export class WorkspaceContextService implements IWorkspaceContextService {
 
-	applicationName: string;
-	darwinBundleIdentifier: string;
+	public _serviceBrand: any;
 
-	version: string;
-	commitHash: string;
+	private workspace: IWorkspace;
 
-	updateFeedUrl: string;
-	updateChannel: string;
+	constructor(workspace: IWorkspace) {
+		this.workspace = workspace;
+	}
 
-	extensionsGallery: {
-		serviceUrl: string;
-		cacheUrl: string;
-		itemUrl: string;
-	};
+	public getWorkspace(): IWorkspace {
+		return this.workspace;
+	}
 
-	extensionTips: { [id: string]: string; };
+	public hasWorkspace(): boolean {
+		return !!this.workspace;
+	}
 
-	releaseNotesUrl: string;
-	licenseUrl: string;
-	productDownloadUrl: string;
+	public isInsideWorkspace(resource: URI): boolean {
+		if (resource && this.workspace) {
+			return isEqualOrParent(resource.fsPath, this.workspace.resource.fsPath, !isLinux /* ignorecase */);
+		}
 
-	welcomePage: string;
+		return false;
+	}
 
-	crashReporter: any;
+	public toWorkspaceRelativePath(resource: URI, toOSPath?: boolean): string {
+		if (this.isInsideWorkspace(resource)) {
+			return paths.normalize(paths.relative(this.workspace.resource.fsPath, resource.fsPath), toOSPath);
+		}
 
-	appSettingsHome: string;
-	appSettingsPath: string;
-	appKeybindingsPath: string;
+		return null;
+	}
 
-	debugExtensionHostPort: number;
-	debugBrkExtensionHost: boolean;
-	disableExtensions: boolean;
+	public toResource(workspaceRelativePath: string): URI {
+		if (typeof workspaceRelativePath === 'string' && this.workspace) {
+			return URI.file(paths.join(this.workspace.resource.fsPath, workspaceRelativePath));
+		}
 
-	logExtensionHostCommunication: boolean;
-	debugBrkFileWatcherPort: number;
-	verboseLogging: boolean;
-	enablePerformance: boolean;
-
-	userExtensionsHome: string;
-	sharedIPCHandle: string;
-	extensionDevelopmentPath: string;
-	extensionTestsPath: string;
-
-	recentFiles: string[];
-	recentFolders: string[];
-
-	enableTelemetry: boolean;
-
-	aiConfig: {
-		key: string;
-		asimovKey: string;
-	};
-
-	sendASmile: {
-		reportIssueUrl: string,
-		requestFeatureUrl: string
-	};
+		return null;
+	}
 }

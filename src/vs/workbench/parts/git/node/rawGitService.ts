@@ -4,13 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import path = require('path');
+import { join, isAbsolute, relative } from 'path';
 import { TPromise, Promise } from 'vs/base/common/winjs.base';
-import mime = require('vs/base/node/mime');
-import pfs = require('vs/base/node/pfs');
+import { detectMimesFromFile, detectMimesFromStream } from 'vs/base/node/mime';
+import { realpath, exists } from 'vs/base/node/pfs';
 import { Repository, GitError } from 'vs/workbench/parts/git/node/git.lib';
-import { IRawGitService, RawServiceState, IRawStatus, IHead, GitErrorCodes, IPushOptions } from 'vs/workbench/parts/git/common/git';
-import Event, { Emitter } from 'vs/base/common/event';
+import { IRawGitService, RawServiceState, IRawStatus, IRef, GitErrorCodes, IPushOptions, ICommit } from 'vs/workbench/parts/git/common/git';
+import Event, { Emitter, delayed } from 'vs/base/common/event';
 
 export class RawGitService implements IRawGitService {
 
@@ -36,11 +36,15 @@ export class RawGitService implements IRawGitService {
 	}
 
 	getVersion(): TPromise<string> {
-		return TPromise.as(this.repo.version);
+		if (!this.repo) {
+			return TPromise.as(null);
+		}
+
+		return TPromise.as(this.repo.git.version);
 	}
 
 	private getRepositoryRoot(): TPromise<string> {
-		return this._repositoryRoot || (this._repositoryRoot = pfs.realpath(this.repo.path));
+		return this._repositoryRoot || (this._repositoryRoot = realpath(this.repo.path));
 	}
 
 	serviceState(): TPromise<RawServiceState> {
@@ -48,6 +52,14 @@ export class RawGitService implements IRawGitService {
 			? RawServiceState.OK
 			: RawServiceState.GitNotFound
 		);
+	}
+
+	statusCount(): TPromise<number> {
+		if (!this.repo) {
+			return TPromise.as(0);
+		}
+
+		return this.status().then(r => r ? r.status.length : 0);
 	}
 
 	status(): TPromise<IRawStatus> {
@@ -59,15 +71,14 @@ export class RawGitService implements IRawGitService {
 					} else {
 						return HEAD;
 					}
-				}, (): IHead => null)
-				.then(HEAD => Promise.join([this.getRepositoryRoot(), this.repo.getHeads(), this.repo.getTags(), this.repo.getRemotes()]).then(r => {
+				}, (): IRef => null)
+				.then(HEAD => Promise.join([this.getRepositoryRoot(), this.repo.getRefs(), this.repo.getRemotes()]).then(r => {
 					return {
 						repositoryRoot: r[0],
 						status: status,
 						HEAD: HEAD,
-						heads: r[1],
-						tags: r[2],
-						remotes: r[3]
+						refs: r[1],
+						remotes: r[2]
 					};
 				})))
 			.then(null, (err) => {
@@ -131,7 +142,7 @@ export class RawGitService implements IRawGitService {
 		return this.repo.pull(rebase).then(() => this.status());
 	}
 
-	push(remote?: string, name?: string, options?:IPushOptions): TPromise<IRawStatus> {
+	push(remote?: string, name?: string, options?: IPushOptions): TPromise<IRawStatus> {
 		return this.repo.push(remote, name, options).then(() => this.status());
 	}
 
@@ -139,7 +150,7 @@ export class RawGitService implements IRawGitService {
 		return this.repo.sync().then(() => this.status());
 	}
 
-	commit(message:string, amend?: boolean, stage?: boolean): TPromise<IRawStatus> {
+	commit(message: string, amend?: boolean, stage?: boolean, signoff?: boolean): TPromise<IRawStatus> {
 		let promise: Promise = TPromise.as(null);
 
 		if (stage) {
@@ -147,35 +158,34 @@ export class RawGitService implements IRawGitService {
 		}
 
 		return promise
-			.then(() => this.repo.commit(message, stage, amend))
+			.then(() => this.repo.commit(message, stage, amend, signoff))
 			.then(() => this.status());
 	}
 
 	detectMimetypes(filePath: string, treeish?: string): TPromise<string[]> {
-		return pfs.exists(path.join(this.repo.path, filePath)).then((exists) => {
+		return exists(join(this.repo.path, filePath)).then((exists) => {
 			if (exists) {
-				return new TPromise<string[]>((c, e) => {
-					mime.detectMimesFromFile(path.join(this.repo.path, filePath), (err, result) => {
-						if (err) { e(err); }
-						else { c(result.mimes); }
-					});
-				});
+				return detectMimesFromFile(join(this.repo.path, filePath))
+					.then(result => result.mimes);
 			}
 
 			const child = this.repo.show(treeish + ':' + filePath);
 
-			return new TPromise<string[]>((c, e) => {
-				mime.detectMimesFromStream(child.stdout, filePath, (err, result) => {
-					if (err) { e(err); }
-					else { c(result.mimes); }
-				});
-			});
+			return new TPromise<string[]>((c, e) =>
+				detectMimesFromStream(child.stdout, filePath)
+					.then(result => result.mimes)
+			);
 		});
 	}
 
 	// careful, this buffers the whole object into memory
 	show(filePath: string, treeish?: string): TPromise<string> {
 		treeish = (!treeish || treeish === '~') ? '' : treeish;
+
+		if (isAbsolute(filePath)) {
+			filePath = relative(this.repo.path, filePath).replace(/\\/g, '/');
+		}
+
 		return this.repo.buffer(treeish + ':' + filePath).then(null, e => {
 			if (e instanceof GitError) {
 				return ''; // mostly untracked files end up in a git error
@@ -184,4 +194,44 @@ export class RawGitService implements IRawGitService {
 			return TPromise.wrapError<string>(e);
 		});
 	}
+
+	clone(url: string, parentPath: string): TPromise<string> {
+		return this.repo.git.clone(url, parentPath);
+	}
+
+	getCommitTemplate(): TPromise<string> {
+		return this.repo.getCommitTemplate();
+	}
+
+	getCommit(ref: string): TPromise<ICommit> {
+		return this.repo.getCommit(ref);
+	}
+}
+
+export class DelayedRawGitService implements IRawGitService {
+	constructor(private raw: TPromise<IRawGitService>) { }
+	onOutput: Event<string> = delayed(this.raw.then(r => r.onOutput));
+	getVersion(): TPromise<string> { return this.raw.then(r => r.getVersion()); }
+	serviceState(): TPromise<RawServiceState> { return this.raw.then(r => r.serviceState()); }
+	statusCount(): TPromise<number> { return this.raw.then(r => r.statusCount()); }
+	status(): TPromise<IRawStatus> { return this.raw.then(r => r.status()); }
+	init(): TPromise<IRawStatus> { return this.raw.then(r => r.init()); }
+	add(filesPaths?: string[]): TPromise<IRawStatus> { return this.raw.then(r => r.add(filesPaths)); }
+	stage(filePath: string, content: string): TPromise<IRawStatus> { return this.raw.then(r => r.stage(filePath, content)); }
+	branch(name: string, checkout?: boolean): TPromise<IRawStatus> { return this.raw.then(r => r.branch(name, checkout)); }
+	checkout(treeish?: string, filePaths?: string[]): TPromise<IRawStatus> { return this.raw.then(r => r.checkout(treeish, filePaths)); }
+	clean(filePaths: string[]): TPromise<IRawStatus> { return this.raw.then(r => r.clean(filePaths)); }
+	undo(): TPromise<IRawStatus> { return this.raw.then(r => r.undo()); }
+	reset(treeish: string, hard?: boolean): TPromise<IRawStatus> { return this.raw.then(r => r.reset(treeish, hard)); }
+	revertFiles(treeish: string, filePaths?: string[]): TPromise<IRawStatus> { return this.raw.then(r => r.revertFiles(treeish, filePaths)); }
+	fetch(): TPromise<IRawStatus> { return this.raw.then(r => r.fetch()); }
+	pull(rebase?: boolean): TPromise<IRawStatus> { return this.raw.then(r => r.pull(rebase)); }
+	push(remote?: string, name?: string, options?: IPushOptions): TPromise<IRawStatus> { return this.raw.then(r => r.push(remote, name, options)); }
+	sync(): TPromise<IRawStatus> { return this.raw.then(r => r.sync()); }
+	commit(message: string, amend?: boolean, stage?: boolean, signoff?: boolean): TPromise<IRawStatus> { return this.raw.then(r => r.commit(message, amend, stage, signoff)); }
+	detectMimetypes(path: string, treeish?: string): TPromise<string[]> { return this.raw.then(r => r.detectMimetypes(path, treeish)); }
+	show(path: string, treeish?: string): TPromise<string> { return this.raw.then(r => r.show(path, treeish)); }
+	clone(url: string, parentPath: string): TPromise<string> { return this.raw.then(r => r.clone(url, parentPath)); }
+	getCommitTemplate(): TPromise<string> { return this.raw.then(r => r.getCommitTemplate()); }
+	getCommit(ref: string): TPromise<ICommit> { return this.raw.then(r => r.getCommit(ref)); }
 }

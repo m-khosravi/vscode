@@ -5,13 +5,12 @@
 
 'use strict';
 
-import {IDisposable} from 'vs/base/common/lifecycle';
-import {IStatusbarItem} from 'vs/workbench/browser/parts/statusbar/statusbar';
-import {FeedbackDropdown, IFeedback, IFeedbackService} from 'vs/workbench/parts/feedback/browser/feedback';
-import {IContextViewService} from 'vs/platform/contextview/browser/contextView';
-import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
-import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
-import {shell} from 'electron';
+import { IDisposable } from 'vs/base/common/lifecycle';
+import { IStatusbarItem } from 'vs/workbench/browser/parts/statusbar/statusbar';
+import { FeedbackDropdown, IFeedback, IFeedbackService } from './feedback';
+import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
+import product from 'vs/platform/node/product';
 
 class TwitterFeedbackService implements IFeedbackService {
 
@@ -24,9 +23,10 @@ class TwitterFeedbackService implements IFeedbackService {
 	}
 
 	public submitFeedback(feedback: IFeedback): void {
-		var queryString = `?${feedback.sentiment === 1 ? `hashtags=${this.combineHashTagsAsString()}&` : null}ref_src=twsrc%5Etfw&related=twitterapi%2Ctwitter&text=${feedback.feedback}&tw_p=tweetbutton&via=${TwitterFeedbackService.VIA_NAME}`;
-		var url = TwitterFeedbackService.TWITTER_URL + queryString;
-		shell.openExternal(url);
+		const queryString = `?${feedback.sentiment === 1 ? `hashtags=${this.combineHashTagsAsString()}&` : null}ref_src=twsrc%5Etfw&related=twitterapi%2Ctwitter&text=${feedback.feedback}&tw_p=tweetbutton&via=${TwitterFeedbackService.VIA_NAME}`;
+		const url = TwitterFeedbackService.TWITTER_URL + queryString;
+
+		window.open(url);
 	}
 
 	public getCharacterLimit(sentiment: number): number {
@@ -40,6 +40,7 @@ class TwitterFeedbackService implements IFeedbackService {
 		if (TwitterFeedbackService.VIA_NAME) {
 			length += ` via @${TwitterFeedbackService.VIA_NAME}`.length;
 		}
+
 		return 140 - length;
 	}
 }
@@ -48,17 +49,18 @@ export class FeedbackStatusbarItem implements IStatusbarItem {
 
 	constructor(
 		@IInstantiationService private instantiationService: IInstantiationService,
-		@IContextViewService private contextViewService: IContextViewService,
-		@IWorkspaceContextService private contextService: IWorkspaceContextService
+		@IContextViewService private contextViewService: IContextViewService
 	) {
 	}
 
 	public render(element: HTMLElement): IDisposable {
-		if (this.contextService.getConfiguration().env.sendASmile) {
+		if (product.sendASmile) {
 			return this.instantiationService.createInstance(FeedbackDropdown, element, {
 				contextViewProvider: this.contextViewService,
 				feedbackService: this.instantiationService.createInstance(TwitterFeedbackService)
 			});
 		}
+
+		return null;
 	}
 }

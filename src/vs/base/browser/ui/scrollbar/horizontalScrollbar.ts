@@ -4,13 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {AbstractScrollbar, ScrollbarHost, IMouseMoveEventData} from 'vs/base/browser/ui/scrollbar/abstractScrollbar';
-import {IMouseEvent, StandardMouseWheelEvent} from 'vs/base/browser/mouseEvent';
-import {IDomNodePosition} from 'vs/base/browser/dom';
-import {ScrollbarVisibility, ScrollableElementResolvedOptions} from 'vs/base/browser/ui/scrollbar/scrollableElementOptions';
-import {Scrollable, ScrollEvent} from 'vs/base/common/scrollable';
-import {ScrollbarState} from 'vs/base/browser/ui/scrollbar/scrollbarState';
-import {ARROW_IMG_SIZE} from 'vs/base/browser/ui/scrollbar/scrollbarArrow';
+import { AbstractScrollbar, ScrollbarHost, IMouseMoveEventData } from 'vs/base/browser/ui/scrollbar/abstractScrollbar';
+import { IMouseEvent, StandardMouseWheelEvent } from 'vs/base/browser/mouseEvent';
+import { IDomNodePagePosition } from 'vs/base/browser/dom';
+import { ScrollableElementResolvedOptions } from 'vs/base/browser/ui/scrollbar/scrollableElementOptions';
+import { Scrollable, ScrollEvent, ScrollbarVisibility } from 'vs/base/common/scrollable';
+import { ScrollbarState } from 'vs/base/browser/ui/scrollbar/scrollbarState';
+import { ARROW_IMG_SIZE } from 'vs/base/browser/ui/scrollbar/scrollbarArrow';
 
 export class HorizontalScrollbar extends AbstractScrollbar {
 
@@ -77,14 +77,14 @@ export class HorizontalScrollbar extends AbstractScrollbar {
 		this.domNode.setBottom(0);
 	}
 
-	public onDidScroll(e:ScrollEvent): boolean {
+	public onDidScroll(e: ScrollEvent): boolean {
 		this._shouldRender = this._onElementScrollSize(e.scrollWidth) || this._shouldRender;
 		this._shouldRender = this._onElementScrollPosition(e.scrollLeft) || this._shouldRender;
 		this._shouldRender = this._onElementSize(e.width) || this._shouldRender;
 		return this._shouldRender;
 	}
 
-	protected _mouseDownRelativePosition(e: IMouseEvent, domNodePosition: IDomNodePosition): number {
+	protected _mouseDownRelativePosition(e: IMouseEvent, domNodePosition: IDomNodePagePosition): number {
 		return e.posx - domNodePosition.left;
 	}
 
@@ -97,7 +97,8 @@ export class HorizontalScrollbar extends AbstractScrollbar {
 	}
 
 	protected _getScrollPosition(): number {
-		return this._scrollable.getScrollLeft();
+		const scrollState = this._scrollable.getState();
+		return scrollState.scrollLeft;
 	}
 
 	protected _setScrollPosition(scrollPosition: number) {

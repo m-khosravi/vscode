@@ -5,14 +5,14 @@
 'use strict';
 
 import * as assert from 'assert';
-import { toErrorMessage } from 'vs/base/common/errors';
+import { toErrorMessage } from 'vs/base/common/errorMessage';
 
 suite('Errors', () => {
 	test('Get Error Message', function () {
 		assert.strictEqual(toErrorMessage('Foo Bar'), 'Foo Bar');
 		assert.strictEqual(toErrorMessage(new Error('Foo Bar')), 'Foo Bar');
 
-		var error: any = new Error();
+		let error: any = new Error();
 		error.status = 404;
 		error.statusText = 'Not Found';
 		assert.strictEqual(toErrorMessage(error), 'Not Found (HTTP 404)');
@@ -34,7 +34,7 @@ suite('Errors', () => {
 		error.detail = {};
 		error.detail.error = [];
 
-		var foo: any = {};
+		let foo: any = {};
 		error.detail.error.push(foo);
 		foo.status = 404;
 		foo.statusText = 'Not Found';

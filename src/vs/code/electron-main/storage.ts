@@ -6,20 +6,14 @@
 'use strict';
 
 import * as path from 'path';
-import * as fs from 'fs';
-import { EventEmitter } from 'events';
-import { IEnvironmentService } from 'vs/code/electron-main/env';
-import { ServiceIdentifier, createDecorator } from 'vs/platform/instantiation/common/instantiation';
-
-const EventTypes = {
-	STORE: 'store'
-};
+import * as fs from 'original-fs';
+import { IEnvironmentService } from 'vs/platform/environment/common/environment';
+import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 
 export const IStorageService = createDecorator<IStorageService>('storageService');
 
 export interface IStorageService {
-	serviceId: ServiceIdentifier<any>;
-	onStore<T>(clb: (key: string, oldValue: T, newValue: T) => void): () => void;
+	_serviceBrand: any;
 	getItem<T>(key: string, defaultValue?: T): T;
 	setItem(key: string, data: any): void;
 	removeItem(key: string): void;
@@ -27,20 +21,13 @@ export interface IStorageService {
 
 export class StorageService implements IStorageService {
 
-	serviceId = IStorageService;
+	_serviceBrand: any;
 
 	private dbPath: string;
 	private database: any = null;
-	private eventEmitter = new EventEmitter();
 
-	constructor(@IEnvironmentService private envService: IEnvironmentService) {
-		this.dbPath = path.join(envService.appHome, 'storage.json');
-	}
-
-	onStore<T>(clb: (key: string, oldValue: T, newValue: T) => void): () => void {
-		this.eventEmitter.addListener(EventTypes.STORE, clb);
-
-		return () => this.eventEmitter.removeListener(EventTypes.STORE, clb);
+	constructor( @IEnvironmentService private environmentService: IEnvironmentService) {
+		this.dbPath = path.join(environmentService.userDataPath, 'storage.json');
 	}
 
 	getItem<T>(key: string, defaultValue?: T): T {
@@ -68,11 +55,8 @@ export class StorageService implements IStorageService {
 			}
 		}
 
-		let oldValue = this.database[key];
 		this.database[key] = data;
 		this.save();
-
-		this.eventEmitter.emit(EventTypes.STORE, key, oldValue, data);
 	}
 
 	removeItem(key: string): void {
@@ -81,19 +65,16 @@ export class StorageService implements IStorageService {
 		}
 
 		if (this.database[key]) {
-			let oldValue = this.database[key];
 			delete this.database[key];
 			this.save();
-
-			this.eventEmitter.emit(EventTypes.STORE, key, oldValue, null);
 		}
 	}
 
 	private load(): any {
 		try {
-			return JSON.parse(fs.readFileSync(this.dbPath).toString());
+			return JSON.parse(fs.readFileSync(this.dbPath).toString()); // invalid JSON or permission issue can happen here
 		} catch (error) {
-			if (this.envService.cliArgs.verboseLogging) {
+			if (this.environmentService.verbose) {
 				console.error(error);
 			}
 
@@ -102,6 +83,12 @@ export class StorageService implements IStorageService {
 	}
 
 	private save(): void {
-		fs.writeFileSync(this.dbPath, JSON.stringify(this.database, null, 4));
+		try {
+			fs.writeFileSync(this.dbPath, JSON.stringify(this.database, null, 4)); // permission issue can happen here
+		} catch (error) {
+			if (this.environmentService.verbose) {
+				console.error(error);
+			}
+		}
 	}
 }

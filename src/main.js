@@ -3,14 +3,27 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+'use strict';
+
+if (process.argv.indexOf('--prof-startup') >= 0) {
+	var profiler = require('v8-profiler');
+	var prefix = require('crypto').randomBytes(2).toString('hex');
+	process.env.VSCODE_PROFILES_PREFIX = prefix;
+	profiler.startProfiling('main', true);
+}
+
 // Perf measurements
-global.vscodeStart = Date.now();
+global.perfStartTime = Date.now();
 
 var app = require('electron').app;
 var fs = require('fs');
 var path = require('path');
+var minimist = require('minimist');
 var paths = require('./paths');
-var pkg = require('../package.json');
+
+var args = minimist(process.argv, {
+	string: ['user-data-dir', 'locale']
+});
 
 function stripComments(content) {
 	var regexp = /("(?:[^\\\"]*(?:\\.)?)*")|('(?:[^\\\']*(?:\\.)?)*')|(\/\*(?:\r?\n|.)*?\*\/)|(\/{2,}.*?(?:(?:\r?\n)|$))/g;
@@ -36,19 +49,10 @@ function stripComments(content) {
 		}
 	});
 	return result;
-};
+}
 
 function getNLSConfiguration() {
-	var locale = undefined;
-	var localeOpts = '--locale';
-	for (var i = 0; i < process.argv.length; i++) {
-		var arg = process.argv[i];
-		if (arg.slice(0, localeOpts.length) == localeOpts) {
-			var segments = arg.split('=');
-			locale = segments[1];
-			break;
-		}
-	}
+	var locale = args['locale'];
 
 	if (!locale) {
 		var userData = app.getPath('userData');
@@ -61,6 +65,7 @@ function getNLSConfiguration() {
 					locale = value;
 				}
 			} catch (e) {
+				// noop
 			}
 		}
 	}
@@ -73,7 +78,7 @@ function getNLSConfiguration() {
 	// the locale we receive from the user or OS.
 	locale = locale ? locale.toLowerCase() : locale;
 	if (locale === 'pseudo') {
-		return { locale: locale, availableLanguages: {}, pseudo: true }
+		return { locale: locale, availableLanguages: {}, pseudo: true };
 	}
 	var initialLocale = locale;
 	if (process.env['VSCODE_DEV']) {
@@ -113,6 +118,50 @@ function getNLSConfiguration() {
 	return resolvedLocale ? resolvedLocale : { locale: initialLocale, availableLanguages: {} };
 }
 
+function getNodeCachedDataDir() {
+
+	// IEnvironmentService.isBuilt
+	if (process.env['VSCODE_DEV']) {
+		return Promise.resolve(undefined);
+	}
+
+	var dir = path.join(app.getPath('userData'), 'CachedData');
+
+	return mkdirp(dir).then(undefined, function (err) { /*ignore*/ });
+}
+
+function mkdirp(dir) {
+	return mkdir(dir)
+		.then(null, function (err) {
+			if (err && err.code === 'ENOENT') {
+				var parent = path.dirname(dir);
+				if (parent !== dir) { // if not arrived at root
+					return mkdirp(parent)
+						.then(function () {
+							return mkdir(dir);
+						});
+				}
+			}
+			throw err;
+		});
+}
+
+function mkdir(dir) {
+	return new Promise(function (resolve, reject) {
+		fs.mkdir(dir, function (err) {
+			if (err && err.code !== 'EEXIST') {
+				reject(err);
+			} else {
+				resolve(dir);
+			}
+		});
+	});
+}
+
+// Set userData path before app 'ready' event and call to process.chdir
+var userData = path.resolve(args['user-data-dir'] || paths.getDefaultUserDataPath(process.platform));
+app.setPath('userData', userData);
+
 // Update cwd based on environment and platform
 try {
 	if (process.platform === 'win32') {
@@ -125,10 +174,6 @@ try {
 	console.error(err);
 }
 
-// Set userData path before app 'ready' event
-var userData = paths.getUserDataPath(process.platform, pkg.name, process.argv);
-app.setPath('userData', userData);
-
 // Mac: when someone drops a file to the not-yet running VSCode, the open-file event fires even before
 // the app-ready event. We listen very early for open-file and remember this upon startup as path to open.
 global.macOpenFiles = [];
@@ -136,9 +181,37 @@ app.on('open-file', function (event, path) {
 	global.macOpenFiles.push(path);
 });
 
+var openUrls = [];
+var onOpenUrl = function (event, url) {
+	event.preventDefault();
+	openUrls.push(url);
+};
+
+app.on('will-finish-launching', function () {
+	app.on('open-url', onOpenUrl);
+});
+
+global.getOpenUrls = function () {
+	app.removeListener('open-url', onOpenUrl);
+	return openUrls;
+};
+
+
+// use '<UserData>/CachedData'-directory to store
+// node/v8 cached data.
+var nodeCachedDataDir = getNodeCachedDataDir().then(function (value) {
+	if (value) {
+		process.env['VSCODE_NODE_CACHED_DATA_DIR_' + process.pid] = value;
+	}
+});
+
 // Load our code once ready
 app.once('ready', function () {
+	global.perfAppReady = Date.now();
 	var nlsConfig = getNLSConfiguration();
 	process.env['VSCODE_NLS_CONFIG'] = JSON.stringify(nlsConfig);
-	require('./bootstrap-amd').bootstrap('vs/code/electron-main/main');
+
+	nodeCachedDataDir.then(function () {
+		require('./bootstrap-amd').bootstrap('vs/code/electron-main/main');
+	}, console.error);
 });

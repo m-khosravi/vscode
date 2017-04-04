@@ -6,7 +6,7 @@
 
 function createModuleDescription(name, exclude) {
 	var result= {};
-	var excludes = ['vs/css', 'vs/nls', 'vs/text'];
+	var excludes = ['vs/css', 'vs/nls'];
 	result.name= name;
 	if (Array.isArray(exclude) && exclude.length > 0) {
 		excludes = excludes.concat(exclude);
@@ -20,6 +20,6 @@ exports.collectModules= function() {
 		createModuleDescription('vs/code/electron-main/main', []),
 		createModuleDescription('vs/code/node/cli', []),
 		createModuleDescription('vs/code/node/cliProcessMain', ['vs/code/node/cli']),
-		createModuleDescription('vs/code/node/sharedProcessMain', [])
+		createModuleDescription('vs/code/electron-browser/sharedProcessMain', [])
 	];
 };

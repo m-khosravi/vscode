@@ -4,11 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-export enum ScrollbarVisibility {
-	Auto = 1,
-	Hidden = 2,
-	Visible = 3
-}
+import { ScrollbarVisibility } from 'vs/base/common/scrollable';
 
 export interface ScrollableElementCreationOptions {
 	/**
@@ -36,9 +32,19 @@ export interface ScrollableElementCreationOptions {
 	handleMouseWheel?: boolean;
 	/**
 	 * Flip axes. Treat vertical scrolling like horizontal and vice-versa.
-	 * Defaults to false;
+	 * Defaults to false.
 	 */
 	flipAxes?: boolean;
+	/**
+	 * If enabled, will scroll horizontally when scrolling vertical.
+	 * Defaults to false.
+	 */
+	scrollYToX?: boolean;
+	/**
+	 * Always consume mouse wheel events, even when scrolling is no longer possible.
+	 * Defaults to false.
+	 */
+	alwaysConsumeMouseWheel?: boolean;
 	/**
 	 * A multiplier to be used on the `deltaX` and `deltaY` of mouse wheel scroll events.
 	 * Defaults to 1.
@@ -96,10 +102,6 @@ export interface ScrollableElementCreationOptions {
 	 * Defaults to false.
 	 */
 	verticalHasArrows?: boolean;
-	/**
-	 * Add a `last-scroll-time` attribute to scroll targets or parents of scroll targets matching the following class name
-	 */
-	saveLastScrollTimeOnClassName?: string;
 }
 
 export interface ScrollableElementChangeOptions {
@@ -115,6 +117,8 @@ export interface ScrollableElementResolvedOptions {
 	useShadows: boolean;
 	handleMouseWheel: boolean;
 	flipAxes: boolean;
+	scrollYToX: boolean;
+	alwaysConsumeMouseWheel: boolean;
 	mouseWheelScrollSensitivity: number;
 	arrowSize: number;
 	listenOnDomNode: HTMLElement;
@@ -126,5 +130,4 @@ export interface ScrollableElementResolvedOptions {
 	verticalScrollbarSize: number;
 	verticalSliderSize: number;
 	verticalHasArrows: boolean;
-	saveLastScrollTimeOnClassName: string;
 }

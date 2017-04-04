@@ -4,17 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import Lifecycle = require('vs/base/common/lifecycle');
-import { IAction } from 'vs/base/common/actions';
-import ActionBar = require('vs/base/browser/ui/actionbar/actionbar');
+import { IDisposable } from 'vs/base/common/lifecycle';
+import { IAction, IActionRunner, Action } from 'vs/base/common/actions';
+import { IActionItem } from 'vs/base/browser/ui/actionbar/actionbar';
 import { TPromise } from 'vs/base/common/winjs.base';
-import {Keybinding} from 'vs/base/common/keyCodes';
-import {createDecorator, ServiceIdentifier} from 'vs/platform/instantiation/common/instantiation';
+import { ResolvedKeybinding } from 'vs/base/common/keyCodes';
+import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 
 export const IContextViewService = createDecorator<IContextViewService>('contextViewService');
 
 export interface IContextViewService {
-	serviceId: ServiceIdentifier<any>;
+	_serviceBrand: any;
 	showContextView(delegate: IContextViewDelegate): void;
 	hideContextView(data?: any): void;
 	layout(): void;
@@ -22,7 +22,7 @@ export interface IContextViewService {
 
 export interface IContextViewDelegate {
 	getAnchor(): HTMLElement | { x: number; y: number; };
-	render(container: HTMLElement): Lifecycle.IDisposable;
+	render(container: HTMLElement): IDisposable;
 	canRelayout?: boolean; // Default: true
 	onDOMEvent?(e: Event, activeElement: HTMLElement): void;
 	onHide?(data?: any): void;
@@ -31,16 +31,30 @@ export interface IContextViewDelegate {
 export const IContextMenuService = createDecorator<IContextMenuService>('contextMenuService');
 
 export interface IContextMenuService {
-	serviceId: ServiceIdentifier<any>;
+	_serviceBrand: any;
 	showContextMenu(delegate: IContextMenuDelegate): void;
+}
+
+export interface IEvent {
+	shiftKey?: boolean;
+	ctrlKey?: boolean;
+	altKey?: boolean;
+	metaKey?: boolean;
 }
 
 export interface IContextMenuDelegate {
 	getAnchor(): HTMLElement | { x: number; y: number; };
-	getActions(): TPromise<IAction[]>;
-	getActionItem?(action: IAction): ActionBar.IActionItem;
-	getActionsContext?(): any;
-	getKeyBinding?(action: IAction): Keybinding;
+	getActions(): TPromise<(IAction | ContextSubMenu)[]>;
+	getActionItem?(action: IAction): IActionItem;
+	getActionsContext?(event?: IEvent): any;
+	getKeyBinding?(action: IAction): ResolvedKeybinding;
 	getMenuClassName?(): string;
 	onHide?(didCancel: boolean): void;
+	actionRunner?: IActionRunner;
+}
+
+export class ContextSubMenu extends Action {
+	constructor(label: string, public entries: (ContextSubMenu | IAction)[]) {
+		super('contextsubmenu', label, '', true);
+	}
 }

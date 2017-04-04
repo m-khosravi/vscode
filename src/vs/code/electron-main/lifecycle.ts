@@ -5,58 +5,95 @@
 
 'use strict';
 
-import { EventEmitter } from 'events';
 import { ipcMain as ipc, app } from 'electron';
-import { TPromise, TValueCallback } from 'vs/base/common/winjs.base';
+import { TPromise, TValueCallback } from 'vs/base/common/winjs.base';
 import { ReadyState, VSCodeWindow } from 'vs/code/electron-main/window';
-import { IEnvironmentService } from 'vs/code/electron-main/env';
-import { ServiceIdentifier, createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { ILogService } from './log';
-
-const EventTypes = {
-	BEFORE_QUIT: 'before-quit'
-};
+import { IEnvironmentService } from 'vs/platform/environment/common/environment';
+import { ILogService } from 'vs/code/electron-main/log';
+import { IStorageService } from 'vs/code/electron-main/storage';
+import Event, { Emitter } from 'vs/base/common/event';
+import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 
 export const ILifecycleService = createDecorator<ILifecycleService>('lifecycleService');
 
-export interface ILifecycleService {
-	serviceId: ServiceIdentifier<any>;
-	onBeforeQuit(clb: () => void): () => void;
-	ready(): void;
-	registerWindow(vscodeWindow: VSCodeWindow): void;
-	unload(vscodeWindow: VSCodeWindow): TPromise<boolean /* veto */>;
-	quit(): TPromise<boolean /* veto */>;
+export enum UnloadReason {
+	CLOSE,
+	QUIT,
+	RELOAD,
+	LOAD
 }
 
-export class LifecycleService implements ILifecycleService {
+export interface ILifecycleService {
+	_serviceBrand: any;
 
-	serviceId = ILifecycleService;
-
-	private eventEmitter = new EventEmitter();
-	private windowToCloseRequest: { [windowId: string]: boolean };
-	private quitRequested: boolean;
-	private pendingQuitPromise: TPromise<boolean>;
-	private pendingQuitPromiseComplete: TValueCallback<boolean>;
-	private oneTimeListenerTokenGenerator: number;
-
-	constructor(
-		@IEnvironmentService private envService: IEnvironmentService,
-		@ILogService private logService: ILogService
-	) {
-		this.windowToCloseRequest = Object.create(null);
-		this.quitRequested = false;
-		this.oneTimeListenerTokenGenerator = 0;
-	}
+	/**
+	 * Will be true if an update was applied. Will only be true for each update once.
+	 */
+	wasUpdated: boolean;
 
 	/**
 	 * Due to the way we handle lifecycle with eventing, the general app.on('before-quit')
 	 * event cannot be used because it can be called twice on shutdown. Instead the onBeforeQuit
 	 * handler in this module can be used and it is only called once on a shutdown sequence.
 	 */
-	onBeforeQuit(clb: () => void): () => void {
-		this.eventEmitter.addListener(EventTypes.BEFORE_QUIT, clb);
+	onBeforeQuit: Event<void>;
 
-		return () => this.eventEmitter.removeListener(EventTypes.BEFORE_QUIT, clb);
+	/**
+	 * We provide our own event when we close a window because the general window.on('close')
+	 * is called even when the window prevents the closing. We want an event that truly fires
+	 * before the window gets closed for real.
+	 */
+	onBeforeWindowClose: Event<VSCodeWindow>;
+
+	ready(): void;
+	registerWindow(vscodeWindow: VSCodeWindow): void;
+	unload(vscodeWindow: VSCodeWindow, reason: UnloadReason): TPromise<boolean /* veto */>;
+	quit(fromUpdate?: boolean): TPromise<boolean /* veto */>;
+	isQuitRequested(): boolean;
+}
+
+export class LifecycleService implements ILifecycleService {
+
+	_serviceBrand: any;
+
+	private static QUIT_FROM_UPDATE_MARKER = 'quit.from.update'; // use a marker to find out if an update was applied in the previous session
+
+	private windowToCloseRequest: { [windowId: string]: boolean };
+	private quitRequested: boolean;
+	private pendingQuitPromise: TPromise<boolean>;
+	private pendingQuitPromiseComplete: TValueCallback<boolean>;
+	private oneTimeListenerTokenGenerator: number;
+	private _wasUpdated: boolean;
+
+	private _onBeforeQuit = new Emitter<void>();
+	onBeforeQuit: Event<void> = this._onBeforeQuit.event;
+
+	private _onBeforeWindowClose = new Emitter<VSCodeWindow>();
+	onBeforeWindowClose: Event<VSCodeWindow> = this._onBeforeWindowClose.event;
+
+	constructor(
+		@IEnvironmentService private environmentService: IEnvironmentService,
+		@ILogService private logService: ILogService,
+		@IStorageService private storageService: IStorageService
+	) {
+		this.windowToCloseRequest = Object.create(null);
+		this.quitRequested = false;
+		this.oneTimeListenerTokenGenerator = 0;
+		this._wasUpdated = false;
+
+		this.handleUpdated();
+	}
+
+	private handleUpdated(): void {
+		this._wasUpdated = !!this.storageService.getItem(LifecycleService.QUIT_FROM_UPDATE_MARKER);
+
+		if (this._wasUpdated) {
+			this.storageService.removeItem(LifecycleService.QUIT_FROM_UPDATE_MARKER); // remove the marker right after if found
+		}
+	}
+
+	public get wasUpdated(): boolean {
+		return this._wasUpdated;
 	}
 
 	public ready(): void {
@@ -70,7 +107,7 @@ export class LifecycleService implements ILifecycleService {
 			this.logService.log('Lifecycle#before-quit');
 
 			if (!this.quitRequested) {
-				this.eventEmitter.emit(EventTypes.BEFORE_QUIT); // only send this if this is the first quit request we have
+				this._onBeforeQuit.fire(); // only send this if this is the first quit request we have
 			}
 
 			this.quitRequested = true;
@@ -83,7 +120,7 @@ export class LifecycleService implements ILifecycleService {
 			// Windows/Linux: we quit when all windows have closed
 			// Mac: we only quit when quit was requested
 			// --wait: we quit when all windows are closed
-			if (this.quitRequested || process.platform !== 'darwin' || this.envService.cliArgs.waitForWindowClose) {
+			if (this.quitRequested || process.platform !== 'darwin' || this.environmentService.wait) {
 				app.quit();
 			}
 		});
@@ -93,7 +130,7 @@ export class LifecycleService implements ILifecycleService {
 
 		// Window Before Closing: Main -> Renderer
 		vscodeWindow.win.on('close', (e) => {
-			let windowId = vscodeWindow.id;
+			const windowId = vscodeWindow.id;
 			this.logService.log('Lifecycle#window-before-close', windowId);
 
 			// The window already acknowledged to be closed
@@ -107,9 +144,10 @@ export class LifecycleService implements ILifecycleService {
 
 			// Otherwise prevent unload and handle it from window
 			e.preventDefault();
-			this.unload(vscodeWindow).done(veto => {
+			this.unload(vscodeWindow, UnloadReason.CLOSE).done(veto => {
 				if (!veto) {
 					this.windowToCloseRequest[windowId] = true;
+					this._onBeforeWindowClose.fire(vscodeWindow);
 					vscodeWindow.win.close();
 				} else {
 					this.quitRequested = false;
@@ -119,7 +157,7 @@ export class LifecycleService implements ILifecycleService {
 		});
 	}
 
-	public unload(vscodeWindow: VSCodeWindow): TPromise<boolean /* veto */> {
+	public unload(vscodeWindow: VSCodeWindow, reason: UnloadReason): TPromise<boolean /* veto */> {
 
 		// Always allow to unload a window that is not yet ready
 		if (vscodeWindow.readyState !== ReadyState.READY) {
@@ -129,15 +167,15 @@ export class LifecycleService implements ILifecycleService {
 		this.logService.log('Lifecycle#unload()', vscodeWindow.id);
 
 		return new TPromise<boolean>((c) => {
-			let oneTimeEventToken = this.oneTimeListenerTokenGenerator++;
-			let oneTimeOkEvent = 'vscode:ok' + oneTimeEventToken;
-			let oneTimeCancelEvent = 'vscode:cancel' + oneTimeEventToken;
+			const oneTimeEventToken = this.oneTimeListenerTokenGenerator++;
+			const okChannel = `vscode:ok${oneTimeEventToken}`;
+			const cancelChannel = `vscode:cancel${oneTimeEventToken}`;
 
-			ipc.once(oneTimeOkEvent, () => {
+			ipc.once(okChannel, () => {
 				c(false); // no veto
 			});
 
-			ipc.once(oneTimeCancelEvent, () => {
+			ipc.once(cancelChannel, () => {
 
 				// Any cancellation also cancels a pending quit if present
 				if (this.pendingQuitPromiseComplete) {
@@ -149,7 +187,7 @@ export class LifecycleService implements ILifecycleService {
 				c(true); // veto
 			});
 
-			vscodeWindow.send('vscode:beforeUnload', { okChannel: oneTimeOkEvent, cancelChannel: oneTimeCancelEvent });
+			vscodeWindow.send('vscode:beforeUnload', { okChannel, cancelChannel, reason: this.quitRequested ? UnloadReason.QUIT : reason });
 		});
 	}
 
@@ -157,17 +195,20 @@ export class LifecycleService implements ILifecycleService {
 	 * A promise that completes to indicate if the quit request has been veto'd
 	 * by the user or not.
 	 */
-	public quit(): TPromise<boolean /* veto */> {
+	public quit(fromUpdate?: boolean): TPromise<boolean /* veto */> {
 		this.logService.log('Lifecycle#quit()');
 
 		if (!this.pendingQuitPromise) {
-			this.pendingQuitPromise = new TPromise<boolean>((c) => {
+			this.pendingQuitPromise = new TPromise<boolean>(c => {
 
 				// Store as field to access it from a window cancellation
 				this.pendingQuitPromiseComplete = c;
 
 				app.once('will-quit', () => {
 					if (this.pendingQuitPromiseComplete) {
+						if (fromUpdate) {
+							this.storageService.setItem(LifecycleService.QUIT_FROM_UPDATE_MARKER, true);
+						}
 						this.pendingQuitPromiseComplete(false /* no veto */);
 						this.pendingQuitPromiseComplete = null;
 						this.pendingQuitPromise = null;
@@ -179,5 +220,9 @@ export class LifecycleService implements ILifecycleService {
 		}
 
 		return this.pendingQuitPromise;
+	}
+
+	public isQuitRequested(): boolean {
+		return !!this.quitRequested;
 	}
 }

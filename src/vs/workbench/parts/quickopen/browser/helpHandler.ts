@@ -4,16 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {TPromise} from 'vs/base/common/winjs.base';
+import { TPromise } from 'vs/base/common/winjs.base';
 import nls = require('vs/nls');
-import {Builder, $} from 'vs/base/browser/builder';
+import { Builder, $ } from 'vs/base/browser/builder';
 import types = require('vs/base/common/types');
-import {Registry} from 'vs/platform/platform';
-import {Mode, IContext, IAutoFocus} from 'vs/base/parts/quickopen/common/quickOpen';
-import {QuickOpenEntryItem, QuickOpenModel} from 'vs/base/parts/quickopen/browser/quickOpenModel';
-import {ITree, IElementCallback} from 'vs/base/parts/tree/browser/tree';
-import {IQuickOpenRegistry, Extensions, QuickOpenHandler} from 'vs/workbench/browser/quickopen';
-import {IQuickOpenService} from 'vs/workbench/services/quickopen/common/quickOpenService';
+import { Registry } from 'vs/platform/platform';
+import { Mode, IEntryRunContext, IAutoFocus } from 'vs/base/parts/quickopen/common/quickOpen';
+import { QuickOpenEntryItem, QuickOpenModel } from 'vs/base/parts/quickopen/browser/quickOpenModel';
+import { ITree, IElementCallback } from 'vs/base/parts/tree/browser/tree';
+import { IQuickOpenRegistry, Extensions, QuickOpenHandler } from 'vs/workbench/browser/quickopen';
+import { IQuickOpenService } from 'vs/platform/quickOpen/common/quickOpen';
 
 export const HELP_PREFIX = '?';
 
@@ -67,46 +67,51 @@ class HelpEntry extends QuickOpenEntryItem {
 	}
 
 	public render(tree: ITree, container: HTMLElement, previousCleanupFn: IElementCallback): IElementCallback {
-		let builder = $(container);
-		builder.addClass('quick-open-entry');
+		const builder = $(container);
 
-		// Support border
-		if (this.showBorder()) {
-			$(container).addClass('results-group-separator');
-		} else {
-			$(container).removeClass('results-group-separator');
-		}
+		builder.div({ class: 'quick-open-entry' }, builder => {
 
-		// Add a container for the group
-		if (this.getGroupLabel()) {
-			$(container).div((div: Builder) => {
-				div.addClass('results-group');
-				div.attr({
-					text: this.getGroupLabel()
+			// Support border
+			if (this.showBorder()) {
+				$(container).addClass('results-group-separator');
+			} else {
+				$(container).removeClass('results-group-separator');
+			}
+
+			builder.div({ class: 'row' }, builder => {
+
+				// Prefix
+				const label = $(builder).div({
+					text: this.prefix,
+					'class': 'quick-open-help-entry-label'
 				});
+
+				if (!this.prefix) {
+					label.text('\u2026');
+				}
+
+				// Description
+				$(builder).span({
+					text: this.description,
+					'class': 'quick-open-entry-description'
+				});
+
+				// Add a container for the group
+				if (this.getGroupLabel()) {
+					$(builder).div((div: Builder) => {
+						div.addClass('results-group');
+						div.attr({
+							text: this.getGroupLabel()
+						});
+					});
+				}
 			});
-		}
-
-		// Prefix
-		let label = builder.clone().div({
-			text: this.prefix,
-			'class': 'quick-open-help-entry-label'
-		});
-
-		if (!this.prefix) {
-			label.text('\u2026');
-		}
-
-		// Description
-		builder.span({
-			text: this.description,
-			'class': 'quick-open-entry-description'
 		});
 
 		return null;
 	}
 
-	public run(mode: Mode, context: IContext): boolean {
+	public run(mode: Mode, context: IEntryRunContext): boolean {
 		if (mode === Mode.OPEN || this.openOnPreview) {
 			this.quickOpenService.show(this.prefix);
 		}
@@ -124,16 +129,16 @@ export class HelpHandler extends QuickOpenHandler {
 	public getResults(searchValue: string): TPromise<QuickOpenModel> {
 		searchValue = searchValue.trim();
 
-		let registry = (<IQuickOpenRegistry>Registry.as(Extensions.Quickopen));
-		let handlerDescriptors = registry.getQuickOpenHandlers();
+		const registry = (<IQuickOpenRegistry>Registry.as(Extensions.Quickopen));
+		const handlerDescriptors = registry.getQuickOpenHandlers();
 
-		let defaultHandlers = registry.getDefaultQuickOpenHandlers();
-		if (defaultHandlers.length > 0) {
-			handlerDescriptors.push(...defaultHandlers);
+		const defaultHandler = registry.getDefaultQuickOpenHandler();
+		if (defaultHandler) {
+			handlerDescriptors.push(defaultHandler);
 		}
 
-		let workbenchScoped: HelpEntry[] = [];
-		let editorScoped: HelpEntry[] = [];
+		const workbenchScoped: HelpEntry[] = [];
+		const editorScoped: HelpEntry[] = [];
 		let entry: HelpEntry;
 
 		handlerDescriptors.sort((h1, h2) => h1.prefix.localeCompare(h2.prefix)).forEach((handlerDescriptor) => {
@@ -142,7 +147,7 @@ export class HelpHandler extends QuickOpenHandler {
 				// Descriptor has multiple help entries
 				if (types.isArray(handlerDescriptor.helpEntries)) {
 					for (let j = 0; j < handlerDescriptor.helpEntries.length; j++) {
-						let helpEntry = handlerDescriptor.helpEntries[j];
+						const helpEntry = handlerDescriptor.helpEntries[j];
 
 						if (helpEntry.prefix.indexOf(searchValue) === 0) {
 							entry = new HelpEntry(helpEntry.prefix, helpEntry.description, this.quickOpenService, searchValue.length > 0);

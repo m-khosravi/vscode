@@ -4,14 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {TimeoutTimer} from 'vs/base/common/async';
-import {onUnexpectedError} from 'vs/base/common/errors';
-import {EventEmitter} from 'vs/base/common/eventEmitter';
-import {Disposable, IDisposable} from 'vs/base/common/lifecycle';
-import {isObject} from 'vs/base/common/types';
-import {isChrome, isWebKit} from 'vs/base/browser/browser';
-import {IKeyboardEvent, StandardKeyboardEvent} from 'vs/base/browser/keyboardEvent';
-import {IMouseEvent, StandardMouseEvent} from 'vs/base/browser/mouseEvent';
+import { TPromise } from 'vs/base/common/winjs.base';
+import { TimeoutTimer } from 'vs/base/common/async';
+import { onUnexpectedError } from 'vs/base/common/errors';
+import { EventEmitter } from 'vs/base/common/eventEmitter';
+import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
+import { isObject } from 'vs/base/common/types';
+import * as browser from 'vs/base/browser/browser';
+import { IKeyboardEvent, StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
+import { IMouseEvent, StandardMouseEvent } from 'vs/base/browser/mouseEvent';
+import { CharCode } from 'vs/base/common/charCode';
 
 export function clearNode(node: HTMLElement) {
 	while (node.firstChild) {
@@ -54,7 +56,6 @@ export function isInDOM(node: Node): boolean {
 	return false;
 }
 
-const _blank = ' '.charCodeAt(0);
 let lastStart: number, lastEnd: number;
 
 function _findClassName(node: HTMLElement, className: string): void {
@@ -94,14 +95,14 @@ function _findClassName(node: HTMLElement, className: string): void {
 		idxEnd = idx + classLen;
 
 		// a class that is followed by another class
-		if ((idx === 0 || classes.charCodeAt(idx - 1) === _blank) && classes.charCodeAt(idxEnd) === _blank) {
+		if ((idx === 0 || classes.charCodeAt(idx - 1) === CharCode.Space) && classes.charCodeAt(idxEnd) === CharCode.Space) {
 			lastStart = idx;
 			lastEnd = idxEnd + 1;
 			return;
 		}
 
 		// last class
-		if (idx > 0 && classes.charCodeAt(idx - 1) === _blank && idxEnd === classesLen) {
+		if (idx > 0 && classes.charCodeAt(idx - 1) === CharCode.Space && idxEnd === classesLen) {
 			lastStart = idx - 1;
 			lastEnd = idxEnd;
 			return;
@@ -167,110 +168,75 @@ export function removeClass(node: HTMLElement, className: string): void {
  */
 export function toggleClass(node: HTMLElement, className: string, shouldHaveIt?: boolean): void {
 	_findClassName(node, className);
-	if (lastStart !== -1 && !shouldHaveIt) {
+	if (lastStart !== -1 && (shouldHaveIt === void 0 || !shouldHaveIt)) {
 		removeClass(node, className);
 	}
-	if (lastStart === -1 && shouldHaveIt) {
+	if (lastStart === -1 && (shouldHaveIt === void 0 || shouldHaveIt)) {
 		addClass(node, className);
 	}
 }
 
-class DomListener extends Disposable {
+class DomListener implements IDisposable {
 
-	private _usedAddEventListener: boolean;
-	private _wrapHandler: (e: any) => void;
-	private _node: any;
-	private _type: string;
-	private _useCapture: boolean;
+	private _handler: (e: any) => void;
+	private _node: Element | Window | Document;
+	private readonly _type: string;
+	private readonly _useCapture: boolean;
 
-	constructor(node: Element|Window|Document, type: string, handler: (e: any) => void, useCapture?: boolean) {
-		super();
-
+	constructor(node: Element | Window | Document, type: string, handler: (e: any) => void, useCapture: boolean) {
 		this._node = node;
 		this._type = type;
+		this._handler = handler;
 		this._useCapture = (useCapture || false);
-
-		this._wrapHandler = (e) => {
-			e = e || window.event;
-			handler(e);
-		};
-
-		if (typeof this._node.addEventListener === 'function') {
-			this._usedAddEventListener = true;
-			this._node.addEventListener(this._type, this._wrapHandler, this._useCapture);
-		} else {
-			this._usedAddEventListener = false;
-			this._node.attachEvent('on' + this._type, this._wrapHandler);
-		}
+		this._node.addEventListener(this._type, this._handler, this._useCapture);
 	}
 
 	public dispose(): void {
-		if (!this._wrapHandler) {
+		if (!this._handler) {
 			// Already disposed
 			return;
 		}
 
-		if (this._usedAddEventListener) {
-			this._node.removeEventListener(this._type, this._wrapHandler, this._useCapture);
-		} else {
-			this._node.detachEvent('on' + this._type, this._wrapHandler);
-		}
+		this._node.removeEventListener(this._type, this._handler, this._useCapture);
 
 		// Prevent leakers from holding on to the dom or handler func
 		this._node = null;
-		this._wrapHandler = null;
+		this._handler = null;
 	}
 }
 
-export function addDisposableListener(node: Element, type: string, handler: (event: any) => void, useCapture?: boolean): IDisposable;
-export function addDisposableListener(node: Element|Window, type: string, handler: (event: any) => void, useCapture?: boolean): IDisposable;
-export function addDisposableListener(node: Window, type: string, handler: (event: any) => void, useCapture?: boolean): IDisposable;
-export function addDisposableListener(node: Document, type: string, handler: (event: any) => void, useCapture?: boolean): IDisposable;
-export function addDisposableListener(node: any, type: string, handler: (event: any) => void, useCapture?: boolean): IDisposable {
+export function addDisposableListener(node: Element | Window | Document, type: string, handler: (event: any) => void, useCapture?: boolean): IDisposable {
 	return new DomListener(node, type, handler, useCapture);
 }
 
 export interface IAddStandardDisposableListenerSignature {
 	(node: HTMLElement, type: 'click', handler: (event: IMouseEvent) => void, useCapture?: boolean): IDisposable;
+	(node: HTMLElement, type: 'mousedown', handler: (event: IMouseEvent) => void, useCapture?: boolean): IDisposable;
 	(node: HTMLElement, type: 'keydown', handler: (event: IKeyboardEvent) => void, useCapture?: boolean): IDisposable;
 	(node: HTMLElement, type: 'keypress', handler: (event: IKeyboardEvent) => void, useCapture?: boolean): IDisposable;
 	(node: HTMLElement, type: 'keyup', handler: (event: IKeyboardEvent) => void, useCapture?: boolean): IDisposable;
 	(node: HTMLElement, type: string, handler: (event: any) => void, useCapture?: boolean): IDisposable;
 }
 function _wrapAsStandardMouseEvent(handler: (e: IMouseEvent) => void): (e: MouseEvent) => void {
-	return function(e: MouseEvent) {
+	return function (e: MouseEvent) {
 		return handler(new StandardMouseEvent(e));
 	};
 }
 function _wrapAsStandardKeyboardEvent(handler: (e: IKeyboardEvent) => void): (e: KeyboardEvent) => void {
-	return function(e: KeyboardEvent) {
+	return function (e: KeyboardEvent) {
 		return handler(new StandardKeyboardEvent(e));
 	};
 }
 export let addStandardDisposableListener: IAddStandardDisposableListenerSignature = function addStandardDisposableListener(node: HTMLElement, type: string, handler: (event: any) => void, useCapture?: boolean): IDisposable {
 	let wrapHandler = handler;
 
-	if (type === 'click') {
+	if (type === 'click' || type === 'mousedown') {
 		wrapHandler = _wrapAsStandardMouseEvent(handler);
 	} else if (type === 'keydown' || type === 'keypress' || type === 'keyup') {
 		wrapHandler = _wrapAsStandardKeyboardEvent(handler);
 	}
 
-	node.addEventListener(type, wrapHandler, useCapture || false);
-	return {
-		dispose: function() {
-			if (!wrapHandler) {
-				// Already removed
-				return;
-			}
-			node.removeEventListener(type, wrapHandler, useCapture || false);
-
-			// Prevent leakers from holding on to the dom node or handler func
-			wrapHandler = null;
-			node = null;
-			handler = null;
-		}
-	};
+	return addDisposableListener(node, type, wrapHandler, useCapture);
 };
 
 export function addDisposableNonBubblingMouseOutListener(node: Element, handler: (event: MouseEvent) => void): IDisposable {
@@ -288,7 +254,7 @@ export function addDisposableNonBubblingMouseOutListener(node: Element, handler:
 	});
 }
 
-const _animationFrame = (function() {
+const _animationFrame = (function () {
 	let emulatedRequestAnimationFrame = (callback: (time: number) => void): number => {
 		return setTimeout(() => callback(new Date().getTime()), 0);
 	};
@@ -373,7 +339,7 @@ class AnimationFrameQueueItem implements IDisposable {
 	}
 }
 
-(function() {
+(function () {
 	/**
 	 * The runners scheduled at the next animation frame
 	 */
@@ -412,21 +378,7 @@ class AnimationFrameQueueItem implements IDisposable {
 
 		if (!animFrameRequested) {
 			animFrameRequested = true;
-
-			// TODO@Alex: also check if it is electron
-			if (isChrome) {
-				let handle: number;
-				_animationFrame.request(function() {
-					clearTimeout(handle);
-					animationFrameRunner();
-				});
-				// This is a fallback in-case chrome dropped
-				// the request for an animation frame. This
-				// is sick but was spotted in the wild
-				handle = setTimeout(animationFrameRunner, 1000);
-			} else {
-				_animationFrame.request(animationFrameRunner);
-			}
+			_animationFrame.request(animationFrameRunner);
 		}
 
 		return item;
@@ -443,15 +395,15 @@ class AnimationFrameQueueItem implements IDisposable {
 	};
 })();
 
-/// <summary>
-/// Add a throttled listener. `handler` is fired at most every 16ms or with the next animation frame (if browser supports it).
-/// </summary>
+/**
+ * Add a throttled listener. `handler` is fired at most every 16ms or with the next animation frame (if browser supports it).
+ */
 export interface IEventMerger<R> {
 	(lastEvent: R, currentEvent: Event): R;
 }
 
 const MINIMUM_TIME_MS = 16;
-const DEFAULT_EVENT_MERGER: IEventMerger<Event> = function(lastEvent: Event, currentEvent: Event) {
+const DEFAULT_EVENT_MERGER: IEventMerger<Event> = function (lastEvent: Event, currentEvent: Event) {
 	return currentEvent;
 };
 
@@ -460,7 +412,7 @@ class TimeoutThrottledDomListener<R> extends Disposable {
 	constructor(node: any, type: string, handler: (event: R) => void, eventMerger: IEventMerger<R> = <any>DEFAULT_EVENT_MERGER, minimumTimeMs: number = MINIMUM_TIME_MS) {
 		super();
 
-		let lastEvent = null;
+		let lastEvent: R = null;
 		let lastHandlerTime = 0;
 		let timeout = this._register(new TimeoutTimer());
 
@@ -495,8 +447,8 @@ export function getComputedStyle(el: HTMLElement): CSSStyleDeclaration {
 
 // Adapted from WinJS
 // Converts a CSS positioning string for the specified element to pixels.
-const convertToPixels: (element: HTMLElement, value: string) => number = (function() {
-	return function(element: HTMLElement, value: string): number {
+const convertToPixels: (element: HTMLElement, value: string) => number = (function () {
+	return function (element: HTMLElement, value: string): number {
 		return parseFloat(value) || 0;
 	};
 })();
@@ -517,42 +469,42 @@ function getDimension(element: HTMLElement, cssPropertyName: string, jsPropertyN
 
 const sizeUtils = {
 
-	getBorderLeftWidth: function(element: HTMLElement): number {
+	getBorderLeftWidth: function (element: HTMLElement): number {
 		return getDimension(element, 'border-left-width', 'borderLeftWidth');
 	},
-	getBorderTopWidth: function(element: HTMLElement): number {
+	getBorderTopWidth: function (element: HTMLElement): number {
 		return getDimension(element, 'border-top-width', 'borderTopWidth');
 	},
-	getBorderRightWidth: function(element: HTMLElement): number {
+	getBorderRightWidth: function (element: HTMLElement): number {
 		return getDimension(element, 'border-right-width', 'borderRightWidth');
 	},
-	getBorderBottomWidth: function(element: HTMLElement): number {
+	getBorderBottomWidth: function (element: HTMLElement): number {
 		return getDimension(element, 'border-bottom-width', 'borderBottomWidth');
 	},
 
-	getPaddingLeft: function(element: HTMLElement): number {
+	getPaddingLeft: function (element: HTMLElement): number {
 		return getDimension(element, 'padding-left', 'paddingLeft');
 	},
-	getPaddingTop: function(element: HTMLElement): number {
+	getPaddingTop: function (element: HTMLElement): number {
 		return getDimension(element, 'padding-top', 'paddingTop');
 	},
-	getPaddingRight: function(element: HTMLElement): number {
+	getPaddingRight: function (element: HTMLElement): number {
 		return getDimension(element, 'padding-right', 'paddingRight');
 	},
-	getPaddingBottom: function(element: HTMLElement): number {
+	getPaddingBottom: function (element: HTMLElement): number {
 		return getDimension(element, 'padding-bottom', 'paddingBottom');
 	},
 
-	getMarginLeft: function(element: HTMLElement): number {
+	getMarginLeft: function (element: HTMLElement): number {
 		return getDimension(element, 'margin-left', 'marginLeft');
 	},
-	getMarginTop: function(element: HTMLElement): number {
+	getMarginTop: function (element: HTMLElement): number {
 		return getDimension(element, 'margin-top', 'marginTop');
 	},
-	getMarginRight: function(element: HTMLElement): number {
+	getMarginRight: function (element: HTMLElement): number {
 		return getDimension(element, 'margin-right', 'marginRight');
 	},
-	getMarginBottom: function(element: HTMLElement): number {
+	getMarginBottom: function (element: HTMLElement): number {
 		return getDimension(element, 'margin-bottom', 'marginBottom');
 	},
 	__commaSentinel: false
@@ -589,22 +541,50 @@ export function getTopLeftOffset(element: HTMLElement): { left: number; top: num
 	};
 }
 
-export interface IDomNodePosition {
+export interface IDomNodePagePosition {
 	left: number;
 	top: number;
 	width: number;
 	height: number;
 }
 
-export function getDomNodePosition(domNode: HTMLElement): IDomNodePosition {
-	let r = getTopLeftOffset(domNode);
+/**
+ * Returns the position of a dom node relative to the entire page.
+ */
+export function getDomNodePagePosition(domNode: HTMLElement): IDomNodePagePosition {
+	let bb = domNode.getBoundingClientRect();
 	return {
-		left: r.left,
-		top: r.top,
-		width: domNode.clientWidth,
-		height: domNode.clientHeight
+		left: bb.left + StandardWindow.scrollX,
+		top: bb.top + StandardWindow.scrollY,
+		width: bb.width,
+		height: bb.height
 	};
 }
+
+export interface IStandardWindow {
+	scrollX: number;
+	scrollY: number;
+}
+
+export const StandardWindow: IStandardWindow = new class {
+	get scrollX(): number {
+		if (typeof window.scrollX === 'number') {
+			// modern browsers
+			return window.scrollX;
+		} else {
+			return document.body.scrollLeft + document.documentElement.scrollLeft;
+		}
+	}
+
+	get scrollY(): number {
+		if (typeof window.scrollY === 'number') {
+			// modern browsers
+			return window.scrollY;
+		} else {
+			return document.body.scrollTop + document.documentElement.scrollTop;
+		}
+	}
+};
 
 // Adapted from WinJS
 // Gets the width of the content of the specified element. The content width does not include borders or padding.
@@ -619,6 +599,11 @@ export function getContentWidth(element: HTMLElement): number {
 export function getTotalWidth(element: HTMLElement): number {
 	let margin = sizeUtils.getMarginLeft(element) + sizeUtils.getMarginRight(element);
 	return element.offsetWidth + margin;
+}
+
+export function getTotalScrollWidth(element: HTMLElement): number {
+	let margin = sizeUtils.getMarginLeft(element) + sizeUtils.getMarginRight(element);
+	return element.scrollWidth + margin;
 }
 
 // Adapted from WinJS
@@ -637,7 +622,7 @@ export function getTotalHeight(element: HTMLElement): number {
 }
 
 // Gets the left coordinate of the specified element relative to the specified parent.
-export function getRelativeLeft(element: HTMLElement, parent: HTMLElement): number {
+function getRelativeLeft(element: HTMLElement, parent: HTMLElement): number {
 	if (element === null) {
 		return 0;
 	}
@@ -647,20 +632,9 @@ export function getRelativeLeft(element: HTMLElement, parent: HTMLElement): numb
 	return elementPosition.left - parentPosition.left;
 }
 
-// Gets the top coordinate of the element relative to the specified parent.
-export function getRelativeTop(element: HTMLElement, parent: HTMLElement): number {
-	if (element === null) {
-		return 0;
-	}
-
-	let elementPosition = getTopLeftOffset(element);
-	let parentPosition = getTopLeftOffset(parent);
-	return parentPosition.top - elementPosition.top;
-}
-
 export function getLargestChildWidth(parent: HTMLElement, children: HTMLElement[]): number {
 	let childWidths = children.map((child) => {
-		return getTotalWidth(child) + getRelativeLeft(child, parent) || 0;
+		return Math.max(getTotalScrollWidth(child), getTotalWidth(child)) + getRelativeLeft(child, parent) || 0;
 	});
 	let maxWidth = Math.max(...childWidths);
 	return maxWidth;
@@ -742,7 +716,7 @@ export function getCSSRule(selector: string, style: HTMLStyleElement = sharedSty
 	return null;
 }
 
-export function removeCSSRulesWithPrefix(ruleName: string, style = sharedStyle): void {
+export function removeCSSRulesContainingSelector(ruleName: string, style = sharedStyle): void {
 	if (!style) {
 		return;
 	}
@@ -752,7 +726,7 @@ export function removeCSSRulesWithPrefix(ruleName: string, style = sharedStyle):
 	for (let i = 0; i < rules.length; i++) {
 		let rule = rules[i];
 		let normalizedSelectorText = rule.selectorText.replace(/::/gi, ':');
-		if (normalizedSelectorText.indexOf(ruleName) === 0) {
+		if (normalizedSelectorText.indexOf(ruleName) !== -1) {
 			toDelete.push(i);
 		}
 	}
@@ -772,6 +746,7 @@ export function isHTMLElement(o: any): o is HTMLElement {
 export const EventType = {
 	// Mouse
 	CLICK: 'click',
+	AUXCLICK: 'auxclick', // >= Chrome 56
 	DBLCLICK: 'dblclick',
 	MOUSE_UP: 'mouseup',
 	MOUSE_DOWN: 'mousedown',
@@ -779,6 +754,7 @@ export const EventType = {
 	MOUSE_MOVE: 'mousemove',
 	MOUSE_OUT: 'mouseout',
 	CONTEXT_MENU: 'contextmenu',
+	WHEEL: 'wheel',
 	// Keyboard
 	KEY_DOWN: 'keydown',
 	KEY_PRESS: 'keypress',
@@ -809,9 +785,9 @@ export const EventType = {
 	DROP: 'drop',
 	DRAG_END: 'dragend',
 	// Animation
-	ANIMATION_START: isWebKit ? 'webkitAnimationStart' : 'animationstart',
-	ANIMATION_END: isWebKit ? 'webkitAnimationEnd' : 'animationend',
-	ANIMATION_ITERATION: isWebKit ? 'webkitAnimationIteration' : 'animationiteration'
+	ANIMATION_START: browser.isWebKit ? 'webkitAnimationStart' : 'animationstart',
+	ANIMATION_END: browser.isWebKit ? 'webkitAnimationEnd' : 'animationend',
+	ANIMATION_ITERATION: browser.isWebKit ? 'webkitAnimationIteration' : 'animationiteration'
 };
 
 export interface EventLike {
@@ -820,7 +796,7 @@ export interface EventLike {
 }
 
 export const EventHelper = {
-	stop: function(e: EventLike, cancelBubble?: boolean) {
+	stop: function (e: EventLike, cancelBubble?: boolean) {
 		if (e.preventDefault) {
 			e.preventDefault();
 		} else {
@@ -840,8 +816,8 @@ export const EventHelper = {
 };
 
 export interface IFocusTracker {
-	addBlurListener(fn:()=>void): IDisposable;
-	addFocusListener(fn:()=>void): IDisposable;
+	addBlurListener(fn: () => void): IDisposable;
+	addFocusListener(fn: () => void): IDisposable;
 	dispose(): void;
 }
 
@@ -867,7 +843,7 @@ class FocusTracker extends Disposable implements IFocusTracker {
 
 	private _eventEmitter: EventEmitter;
 
-	constructor(element: HTMLElement|Window) {
+	constructor(element: HTMLElement | Window) {
 		super();
 
 		let hasFocus = false;
@@ -875,7 +851,7 @@ class FocusTracker extends Disposable implements IFocusTracker {
 
 		this._eventEmitter = this._register(new EventEmitter());
 
-		let onFocus = (event) => {
+		let onFocus = (event: Event) => {
 			loosingFocus = false;
 			if (!hasFocus) {
 				hasFocus = true;
@@ -883,7 +859,7 @@ class FocusTracker extends Disposable implements IFocusTracker {
 			}
 		};
 
-		let onBlur = (event) => {
+		let onBlur = (event: Event) => {
 			if (hasFocus) {
 				loosingFocus = true;
 				window.setTimeout(() => {
@@ -900,28 +876,33 @@ class FocusTracker extends Disposable implements IFocusTracker {
 		this._register(addDisposableListener(element, EventType.BLUR, onBlur, true));
 	}
 
-	public addFocusListener(fn:()=>void): IDisposable {
+	public addFocusListener(fn: () => void): IDisposable {
 		return this._eventEmitter.addListener2('focus', fn);
 	}
 
-	public addBlurListener(fn:()=>void): IDisposable {
+	public addBlurListener(fn: () => void): IDisposable {
 		return this._eventEmitter.addListener2('blur', fn);
 	}
 }
 
-export function trackFocus(element: HTMLElement|Window): IFocusTracker {
+export function trackFocus(element: HTMLElement | Window): IFocusTracker {
 	return new FocusTracker(element);
 }
 
-export function append<T extends Node>(parent: HTMLElement, child: T): T {
-	parent.appendChild(child);
+export function append<T extends Node>(parent: HTMLElement, ...children: T[]): T {
+	children.forEach(child => parent.appendChild(child));
+	return children[children.length - 1];
+}
+
+export function prepend<T extends Node>(parent: HTMLElement, child: T): T {
+	parent.insertBefore(child, parent.firstChild);
 	return child;
 }
 
 const SELECTOR_REGEX = /([\w\-]+)?(#([\w\-]+))?((.([\w\-]+))*)/;
 
 // Similar to builder, but much more lightweight
-export function emmet(description: string): HTMLElement {
+export function $<T extends HTMLElement>(description: string, attrs?: { [key: string]: any; }, ...children: (Node | string)[]): T {
 	let match = SELECTOR_REGEX.exec(description);
 
 	if (!match) {
@@ -929,6 +910,7 @@ export function emmet(description: string): HTMLElement {
 	}
 
 	let result = document.createElement(match[1] || 'div');
+
 	if (match[3]) {
 		result.id = match[3];
 	}
@@ -936,17 +918,59 @@ export function emmet(description: string): HTMLElement {
 		result.className = match[4].replace(/\./g, ' ').trim();
 	}
 
+	Object.keys(attrs || {}).forEach(name => {
+		if (/^on\w+$/.test(name)) {
+			result[name] = attrs[name];
+		} else if (name === 'selected') {
+			const value = attrs[name];
+			if (value) {
+				result.setAttribute(name, 'true');
+			}
+
+		} else {
+			result.setAttribute(name, attrs[name]);
+		}
+	});
+
+	children
+		.filter(child => !!child)
+		.forEach(child => {
+			if (child instanceof Node) {
+				result.appendChild(child);
+			} else {
+				result.appendChild(document.createTextNode(child as string));
+			}
+		});
+
+	return result as T;
+}
+
+export function join(nodes: Node[], separator: Node | string): Node[] {
+	const result: Node[] = [];
+
+	nodes.forEach((node, index) => {
+		if (index > 0) {
+			if (separator instanceof Node) {
+				result.push(separator.cloneNode());
+			} else {
+				result.push(document.createTextNode(separator));
+			}
+		}
+
+		result.push(node);
+	});
+
 	return result;
 }
 
 export function show(...elements: HTMLElement[]): void {
-	for (const element of elements) {
-		element.style.display = null;
+	for (let element of elements) {
+		element.style.display = '';
 	}
 }
 
 export function hide(...elements: HTMLElement[]): void {
-	for (const element of elements) {
+	for (let element of elements) {
 		element.style.display = 'none';
 	}
 }
@@ -984,4 +1008,23 @@ export function removeTabIndexAndUpdateFocus(node: HTMLElement): void {
 
 export function getElementsByTagName(tag: string): HTMLElement[] {
 	return Array.prototype.slice.call(document.getElementsByTagName(tag), 0);
+}
+
+export function finalHandler<T extends Event>(fn: (event: T) => any): (event: T) => any {
+	return e => {
+		e.preventDefault();
+		e.stopPropagation();
+		fn(e);
+	};
+}
+
+export function domContentLoaded(): TPromise<any> {
+	return new TPromise<any>((c, e) => {
+		const readyState = document.readyState;
+		if (readyState === 'complete' || (document && document.body !== null)) {
+			window.setImmediate(c);
+		} else {
+			window.addEventListener('DOMContentLoaded', c, false);
+		}
+	});
 }

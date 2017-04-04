@@ -12,6 +12,7 @@ import { IRawSearchService, IRawSearch, ISerializedSearchComplete, ISerializedSe
 export interface ISearchChannel extends IChannel {
 	call(command: 'fileSearch', search: IRawSearch): PPromise<ISerializedSearchComplete, ISerializedSearchProgressItem>;
 	call(command: 'textSearch', search: IRawSearch): PPromise<ISerializedSearchComplete, ISerializedSearchProgressItem>;
+	call(command: 'clearCache', cacheKey: string): TPromise<void>;
 	call(command: string, arg: any): TPromise<any>;
 }
 
@@ -23,7 +24,9 @@ export class SearchChannel implements ISearchChannel {
 		switch (command) {
 			case 'fileSearch': return this.service.fileSearch(arg);
 			case 'textSearch': return this.service.textSearch(arg);
+			case 'clearCache': return this.service.clearCache(arg);
 		}
+		return undefined;
 	}
 }
 
@@ -37,5 +40,9 @@ export class SearchChannelClient implements IRawSearchService {
 
 	textSearch(search: IRawSearch): PPromise<ISerializedSearchComplete, ISerializedSearchProgressItem> {
 		return this.channel.call('textSearch', search);
+	}
+
+	public clearCache(cacheKey: string): TPromise<void> {
+		return this.channel.call('clearCache', cacheKey);
 	}
 }

@@ -5,29 +5,26 @@
 
 'use strict';
 
-import { ServiceIdentifier, createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { IEnvironmentService } from './env';
+import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { IEnvironmentService } from 'vs/platform/environment/common/environment';
 
 export const ILogService = createDecorator<ILogService>('logService');
 
 export interface ILogService {
-	serviceId: ServiceIdentifier<any>;
-	log(... args: any[]): void;
+	_serviceBrand: any;
+	log(...args: any[]): void;
 }
 
 export class MainLogService implements ILogService {
 
-	serviceId = ILogService;
+	_serviceBrand: any;
 
-	constructor(@IEnvironmentService private envService: IEnvironmentService) {
-
+	constructor( @IEnvironmentService private environmentService: IEnvironmentService) {
 	}
 
 	log(...args: any[]): void {
-		const { verboseLogging } = this.envService.cliArgs;
-
-		if (verboseLogging) {
-			console.log(`(${new Date().toLocaleTimeString()})`, ...args);
+		if (this.environmentService.verbose) {
+			console.log(`\x1b[93m[main ${new Date().toLocaleTimeString()}]\x1b[0m`, ...args);
 		}
 	}
 }

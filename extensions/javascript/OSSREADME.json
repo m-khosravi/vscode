@@ -5,7 +5,7 @@
 	"version": "0.0.1",
 	"license": "Apache2",
 	"repositoryURL": "https://github.com/Microsoft/TypeScript-TmLanguage",
-	"description": "The file syntaxes/JavaScript.tmLanguage was derived from TypeScriptReact.tmLanguage in https://github.com/Microsoft/TypeScript-TmLanguage.",
+	"description": "The file syntaxes/JavaScript.tmLanguage.json was derived from TypeScriptReact.tmLanguage in https://github.com/Microsoft/TypeScript-TmLanguage.",
 	"licenseDetail": [
 		// Reason: LICENSE file does not include Copyright statement
 		"Copyright (c) Microsoft Corporation.  All rights reserved.",
@@ -208,26 +208,4 @@
 		"to the base-name name of the original file, and an extension of txt, html, or similar. For example",
 		"\"tidy\" is accompanied by \"tidy-license.txt\"."
 	]
-},
-{
-	"name": "Microsoft/node-request-light",
-	"version": "0.0.0",
-	"license": "MIT",
-	"isProd": true,
-	"repositoryURL": "https://github.com/Microsoft/node-request-light"
-},
-{
-	"name": "Microsoft/node-jsonc-parser",
-	"version": "0.0.0",
-	"license": "MIT",
-	"isProd": true,
-	"repositoryURL": "https://github.com/Microsoft/node-jsonc-parser"
-},
-{
-	"name": "Microsoft/vscode-nls",
-	"version": "0.0.0",
-	"license": "MIT",
-	"isProd": true,
-	"repositoryURL": "https://github.com/Microsoft/vscode-nls"
-}
-]
+}]

@@ -4,11 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {$, Dimension} from 'vs/base/browser/builder';
-import {QuickOpenModel} from 'vs/base/parts/quickopen/browser/quickOpenModel';
-import {QuickOpenWidget} from 'vs/base/parts/quickopen/browser/quickOpenWidget';
-import {IAutoFocus} from 'vs/base/parts/quickopen/common/quickOpen';
-import {ICodeEditor, IOverlayWidget, IOverlayWidgetPosition, OverlayWidgetPositionPreference} from 'vs/editor/browser/editorBrowser';
+import { $, Dimension } from 'vs/base/browser/builder';
+import { QuickOpenModel } from 'vs/base/parts/quickopen/browser/quickOpenModel';
+import { QuickOpenWidget } from 'vs/base/parts/quickopen/browser/quickOpenWidget';
+import { IAutoFocus } from 'vs/base/parts/quickopen/common/quickOpen';
+import { ICodeEditor, IOverlayWidget, IOverlayWidgetPosition, OverlayWidgetPositionPreference } from 'vs/editor/browser/editorBrowser';
+import { attachQuickOpenStyler } from "vs/platform/theme/common/styler";
+import { IDisposable } from "vs/base/common/lifecycle";
+import { IThemeService } from "vs/platform/theme/common/themeService";
 
 export interface IQuickOpenEditorWidgetOptions {
 	inputAriaLabel: string;
@@ -18,38 +21,43 @@ export class QuickOpenEditorWidget implements IOverlayWidget {
 
 	private static ID = 'editor.contrib.quickOpenEditorWidget';
 
-	private codeEditor:ICodeEditor;
-	private visible:boolean;
-	private quickOpenWidget:QuickOpenWidget;
-	private domNode:HTMLElement;
+	private codeEditor: ICodeEditor;
+	private themeService: IThemeService;
+	private visible: boolean;
+	private quickOpenWidget: QuickOpenWidget;
+	private domNode: HTMLElement;
+	private styler: IDisposable;
 
-	constructor(codeEditor:ICodeEditor, onOk:()=>void, onCancel:()=>void, onType:(value:string)=>void, configuration:IQuickOpenEditorWidgetOptions) {
+	constructor(codeEditor: ICodeEditor, onOk: () => void, onCancel: () => void, onType: (value: string) => void, configuration: IQuickOpenEditorWidgetOptions, themeService: IThemeService) {
 		this.codeEditor = codeEditor;
+		this.themeService = themeService;
 
 		this.create(onOk, onCancel, onType, configuration);
 	}
 
-	private create(onOk:()=>void, onCancel:()=>void, onType:(value:string)=>void, configuration:IQuickOpenEditorWidgetOptions):void {
+	private create(onOk: () => void, onCancel: () => void, onType: (value: string) => void, configuration: IQuickOpenEditorWidgetOptions): void {
 		this.domNode = $().div().getHTMLElement();
 
 		this.quickOpenWidget = new QuickOpenWidget(
 			this.domNode,
 			{
-				onOk:onOk,
-				onCancel:onCancel,
-				onType:onType
+				onOk: onOk,
+				onCancel: onCancel,
+				onType: onType
 			}, {
 				inputPlaceHolder: null,
-				inputAriaLabel: configuration.inputAriaLabel
+				inputAriaLabel: configuration.inputAriaLabel,
+				keyboardSupport: true
 			},
 			null
 		);
+		this.styler = attachQuickOpenStyler(this.quickOpenWidget, this.themeService);
 
 		this.quickOpenWidget.create();
 		this.codeEditor.addOverlayWidget(this);
 	}
 
-	public setInput(model:QuickOpenModel, focus:IAutoFocus):void {
+	public setInput(model: QuickOpenModel, focus: IAutoFocus): void {
 		this.quickOpenWidget.setInput(model, focus);
 	}
 
@@ -57,20 +65,21 @@ export class QuickOpenEditorWidget implements IOverlayWidget {
 		return QuickOpenEditorWidget.ID;
 	}
 
-	public getDomNode():HTMLElement {
+	public getDomNode(): HTMLElement {
 		return this.domNode;
 	}
 
-	public destroy():void {
+	public destroy(): void {
 		this.codeEditor.removeOverlayWidget(this);
 		this.quickOpenWidget.dispose();
+		this.styler.dispose();
 	}
 
-	public isVisible():boolean {
+	public isVisible(): boolean {
 		return this.visible;
 	}
 
-	public show(value:string):void {
+	public show(value: string): void {
 		this.visible = true;
 
 		var editorLayout = this.codeEditor.getLayoutInfo();
@@ -82,7 +91,7 @@ export class QuickOpenEditorWidget implements IOverlayWidget {
 		this.codeEditor.layoutOverlayWidget(this);
 	}
 
-	public hide():void {
+	public hide(): void {
 		this.visible = false;
 		this.quickOpenWidget.hide();
 		this.codeEditor.layoutOverlayWidget(this);

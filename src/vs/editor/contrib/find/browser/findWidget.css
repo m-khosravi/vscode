@@ -65,11 +65,6 @@
 	min-height: 0;
 }
 
-.monaco-editor .find-widget .monaco-findInput,
-.monaco-editor .find-widget .replace-input {
-	background-color: white;
-}
-
 .monaco-editor .find-widget .replace-input .input {
 	font-size: 13px;
 }
@@ -105,17 +100,18 @@
 }
 
 .monaco-editor .find-widget.no-results .matchesCount {
-	background-color: rgba(255,0,0,0.5);
+	color: #A1260D;
 }
-.monaco-editor.vs-dark .find-widget.no-results .matchesCount {
-	background-color: rgba(255,0,0,0.3);
+
+.monaco-editor.vs-dark .find-widget.no-results .matchesCount,
+.monaco-editor.hc-black .find-widget.no-results .matchesCount {
+	color: #F48771
 }
 
 .monaco-editor .find-widget .matchesCount {
 	display: inline-block;
 	margin: 0 1px 0 3px;
 	padding: 2px 2px 0 2px;
-	min-width: 69px;
 	height: 25px;
 	vertical-align: middle;
 	box-sizing: border-box;
@@ -135,7 +131,7 @@
 }
 
 .monaco-editor .find-widget .button:not(.disabled):hover {
-	background-color: #DDD;
+	background-color: rgba(0, 0, 0, 0.1);
 }
 
 .monaco-editor .find-widget .button.left {
@@ -200,6 +196,7 @@
 
 .monaco-editor .find-widget .monaco-checkbox .checkbox:disabled + .label {
 	opacity: 0.3;
+	cursor: default;
 }
 
 .monaco-editor .find-widget .monaco-checkbox .checkbox:not(:disabled) + .label {
@@ -247,8 +244,36 @@
 	width: 100%;
 }
 
+/* REDUCED */
+.monaco-editor .find-widget.reduced-find-widget .matchesCount,
+.monaco-editor .find-widget.reduced-find-widget .monaco-checkbox {
+	display:none;
+}
+
+/* NARROW (SMALLER THAN REDUCED) */
+.monaco-editor .find-widget.narrow-find-widget > .find-part .monaco-findInput,
+.monaco-editor .find-widget.narrow-find-widget > .replace-part .replace-input {
+	width: 171px !important;
+}
+.monaco-editor .find-widget.narrow-find-widget > .find-part .monaco-inputbox > .wrapper > .input {
+	width: 105px !important;
+}
+
+/* COLLAPSED (SMALLER THAN NARROW) */
+.monaco-editor .find-widget.collapsed-find-widget .button.previous,
+.monaco-editor .find-widget.collapsed-find-widget .button.next,
+.monaco-editor .find-widget.collapsed-find-widget .button.replace,
+.monaco-editor .find-widget.collapsed-find-widget .button.replace-all,
+.monaco-editor .find-widget.collapsed-find-widget > .find-part .monaco-findInput .controls {
+	display:none;
+}
+.monaco-editor .find-widget.collapsed-find-widget > .find-part .monaco-findInput,
+.monaco-editor .find-widget.collapsed-find-widget > .replace-part .replace-input,
+.monaco-editor .find-widget.collapsed-find-widget > .find-part .monaco-inputbox > .wrapper > .input {
+	width: 71px !important;
+}
+
 .monaco-editor .findMatch {
-	background-color: rgba(234, 92, 0, 0.3);
 	-webkit-animation-duration: 0;
 	-webkit-animation-name: inherit !important;
 	-moz-animation-duration: 0;
@@ -259,96 +284,69 @@
 	animation-name: inherit !important;
 }
 
-.monaco-editor .currentFindMatch {
-	background-color: #A8AC94;
-}
-
-.monaco-editor .findScope {
-	background-color: rgba(239, 239, 242, 0.4);
-}
-
 /* Theming */
 .monaco-editor .find-widget {
-	background-color: #EFEFF2;
 	box-shadow: 0 2px 8px #A8A8A8;
 }
 
 .monaco-editor.vs-dark .find-widget {
-	background-color: #2D2D30;
 	box-shadow: 0 2px 8px #000;
 }
 
+.monaco-editor.hc-black .find-widget .previous,
 .monaco-editor.vs-dark .find-widget .previous {
 	background-image: url('images/previous-inverse.svg');
 }
 
+.monaco-editor.hc-black .find-widget .next,
 .monaco-editor.vs-dark .find-widget .next {
 	background-image: url('images/next-inverse.svg');
 }
 
+.monaco-editor.hc-black .find-widget .monaco-checkbox .label,
 .monaco-editor.vs-dark .find-widget .monaco-checkbox .label {
 	background-image: url('images/cancelSelectionFind-inverse.svg');
 }
 
 .monaco-editor.vs-dark .find-widget .monaco-checkbox .checkbox:not(:disabled):hover:before + .label {
-	background-color: #2f3334;
+	background-color: rgba(255, 255, 255, 0.1);
 }
 
 .monaco-editor.vs-dark .find-widget .monaco-checkbox .checkbox:checked + .label {
-	background-color: rgba(150, 150, 150, 0.3);
+	background-color: rgba(255, 255, 255, 0.1);
 }
 
+.monaco-editor.hc-black .find-widget .close-fw,
 .monaco-editor.vs-dark .find-widget .close-fw {
 	background-image: url('images/close-dark.svg');
 }
 
+.monaco-editor.hc-black .find-widget .replace,
 .monaco-editor.vs-dark .find-widget .replace {
 	background-image: url('images/replace-inverse.svg');
 }
 
+.monaco-editor.hc-black .find-widget .replace-all,
 .monaco-editor.vs-dark .find-widget .replace-all {
 	background-image: url('images/replace-all-inverse.svg');
 }
 
+.monaco-editor.hc-black .find-widget .expand,
 .monaco-editor.vs-dark .find-widget .expand {
 	background-image: url('images/expando-expanded-dark.svg');
 }
 
+.monaco-editor.hc-black .find-widget .collapse,
 .monaco-editor.vs-dark .find-widget .collapse {
 	background-image: url('images/expando-collapsed-dark.svg');
 }
 
+.monaco-editor.hc-black .find-widget .button:not(.disabled):hover,
 .monaco-editor.vs-dark .find-widget .button:not(.disabled):hover {
-	background-color: #2f3334;
-}
-
-.monaco-editor.vs-dark .currentFindMatch {
-	background-color: #515C6A;
-}
-
-.monaco-editor.vs-dark .findScope {
-	background-color: rgba(58, 61, 65, 0.4);
-}
-
-.monaco-editor.vs-dark .find-widget .monaco-findInput,
-.monaco-editor.vs-dark .find-widget .replace-input {
-	background-color: #3C3C3C;
+	background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* High Contrast Theming */
-.monaco-editor.hc-black .find-widget {
-	border: 2px solid #6FC3DF;
-	background: #0C141F;
-	box-shadow: none;
-}
-
-.monaco-editor.hc-black .find-widget .button:not(.disabled):hover {
-	background: none;
-}
-
-.monaco-editor.hc-black .find-widget .button {
-	background: none;
-}
 
 .monaco-editor.hc-black .find-widget .button:before {
 	position: relative;
@@ -356,72 +354,6 @@
 	left: 2px;
 }
 
-.monaco-editor.hc-black .find-widget .previous:before {
-	content: url('images/previous-inverse.svg');
-}
-
-.monaco-editor.hc-black .find-widget .next:before {
-	content: url('images/next-inverse.svg');
-}
-
-.monaco-editor.hc-black .find-widget .replace:before {
-	content: url('images/replace-inverse.svg');
-}
-
-.monaco-editor.hc-black .find-widget .replace-all:before {
-	content: url('images/replace-all-inverse.svg');
-}
-
-.monaco-editor.hc-black .find-widget .monaco-checkbox .label {
-	content: url('images/cancelSelectionFind-inverse.svg');
-	top: 1px;
-	left: 2px;
-}
-
 .monaco-editor.hc-black .find-widget .monaco-checkbox .checkbox:checked + .label {
-	background-color: rgba(150, 150, 150, 0.3);
-}
-
-.monaco-editor.hc-black .find-widget .close-fw:before {
-	content: url('images/close-dark.svg');
-	top: 1px;
-	left: 0px;
-}
-
-.monaco-editor.hc-black .find-widget .expand:before {
-	content: url('images/expando-expanded-dark.svg');
-	top: 38%;
-	left: 40%
-}
-
-.monaco-editor.hc-black .find-widget .collapse:before {
-	content: url('images/expando-collapsed-dark.svg');
-	top: 30%;
-	left: 40%;
-}
-
-.monaco-editor.hc-black .findMatch {
-	background: none;
-	border: 1px dotted #f38518;
-	-moz-box-sizing: border-box;
-	box-sizing: border-box;
-}
-
-.monaco-editor.hc-black .currentFindMatch {
-	background: none;
-	padding: 1px;
-	border: 2px solid #f38518;
-	-moz-box-sizing: border-box;
-	box-sizing: border-box;
-}
-
-.monaco-editor.hc-black .findScope {
-	background: none;
-	border: 1px dashed #f38518;
-	opacity: .4;
-}
-
-.monaco-editor.hc-black .find-widget .monaco-findInput,
-.monaco-editor.hc-black .find-widget .replace-input {
-	background-color: #000;
+	background-color: rgba(255, 255, 255, 0.1);
 }

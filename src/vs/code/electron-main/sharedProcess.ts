@@ -3,50 +3,104 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as cp from 'child_process';
-import URI from 'vs/base/common/uri';
-import { IDisposable } from 'vs/base/common/lifecycle';
 import { assign } from 'vs/base/common/objects';
-import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
+import { memoize } from 'vs/base/common/decorators';
+import { IDisposable, toDisposable, dispose } from 'vs/base/common/lifecycle';
+import { IEnvironmentService } from 'vs/platform/environment/common/environment';
+import { TPromise } from 'vs/base/common/winjs.base';
+import { IProcessEnvironment } from 'vs/base/common/platform';
+import { BrowserWindow, ipcMain } from 'electron';
+import { PromiseSource } from 'vs/base/common/async';
 
-const boostrapPath = URI.parse(require.toUrl('bootstrap')).fsPath;
+export class SharedProcess {
 
-function _spawnSharedProcess(): cp.ChildProcess {
-	const env = assign({}, process.env, {
-		AMD_ENTRYPOINT: 'vs/code/node/sharedProcessMain'
-	});
+	private window: Electron.BrowserWindow;
+	private disposables: IDisposable[] = [];
 
-	const result = cp.fork(boostrapPath, ['--type=SharedProcess'], { env });
+	@memoize
+	private get _whenReady(): TPromise<void> {
+		this.window = new BrowserWindow({ show: false });
+		const config = assign({
+			appRoot: this.environmentService.appRoot,
+			nodeCachedDataDir: this.environmentService.nodeCachedDataDir,
+			userEnv: this.userEnv
+		});
 
-	// handshake
-	result.once('message', () => result.send('hey'));
+		const url = `${require.toUrl('vs/code/electron-browser/sharedProcess.html')}?config=${encodeURIComponent(JSON.stringify(config))}`;
+		this.window.loadURL(url);
 
-	return result;
-}
-
-let spawnCount = 0;
-
-export function spawnSharedProcess(accessor: ServicesAccessor): IDisposable {
-	let child: cp.ChildProcess;
-
-	const spawn = () => {
-		if (++spawnCount > 10) {
-			return;
-		}
-
-		child = _spawnSharedProcess();
-		child.on('exit', spawn);
-	};
-
-	spawn();
-
-	return {
-		dispose: () => {
-			if (child) {
-				child.removeListener('exit', spawn);
-				child.kill();
-				child = null;
+		// Prevent the window from dying
+		const onClose = e => {
+			if (this.window.isVisible()) {
+				e.preventDefault();
+				this.window.hide();
 			}
+		};
+
+		this.window.on('close', onClose);
+		this.disposables.push(toDisposable(() => this.window.removeListener('close', onClose)));
+
+		this.disposables.push(toDisposable(() => {
+			// Electron seems to crash on Windows without this setTimeout :|
+			setTimeout(() => {
+				try {
+					this.window.close();
+				} catch (err) {
+					// ignore, as electron is already shutting down
+				}
+
+				this.window = null;
+			}, 0);
+		}));
+
+		return new TPromise<void>((c, e) => {
+			ipcMain.once('handshake:hello', ({ sender }) => {
+				sender.send('handshake:hey there', {
+					sharedIPCHandle: this.environmentService.sharedIPCHandle,
+					args: this.environmentService.args
+				});
+
+				ipcMain.once('handshake:im ready', () => c(null));
+			});
+		});
+	}
+
+	private spawnPromiseSource: PromiseSource<void>;
+
+	constructor(
+		private environmentService: IEnvironmentService,
+		private userEnv: IProcessEnvironment
+	) {
+		this.spawnPromiseSource = new PromiseSource<void>();
+	}
+
+	spawn(): void {
+		this.spawnPromiseSource.complete();
+	}
+
+	whenReady(): TPromise<void> {
+		return this.spawnPromiseSource.value.then(() => this._whenReady);
+	}
+
+	toggle(): void {
+		if (this.window.isVisible()) {
+			this.hide();
+		} else {
+			this.show();
 		}
-	};
+	}
+
+	show(): void {
+		this.window.show();
+		this.window.webContents.openDevTools();
+	}
+
+	hide(): void {
+		this.window.webContents.closeDevTools();
+		this.window.hide();
+	}
+
+	dispose(): void {
+		this.disposables = dispose(this.disposables);
+	}
 }

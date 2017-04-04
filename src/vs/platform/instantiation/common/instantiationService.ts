@@ -4,19 +4,19 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {TPromise} from 'vs/base/common/winjs.base';
-import {illegalArgument, illegalState, canceled} from 'vs/base/common/errors';
-import {create} from 'vs/base/common/types';
+import { TPromise } from 'vs/base/common/winjs.base';
+import { illegalArgument, illegalState, canceled } from 'vs/base/common/errors';
+import { create } from 'vs/base/common/types';
 import * as assert from 'vs/base/common/assert';
-import {Graph} from 'vs/base/common/graph';
-import {SyncDescriptor, AsyncDescriptor} from 'vs/platform/instantiation/common/descriptors';
-import {ServiceIdentifier, IInstantiationService, ServicesAccessor, _util, optional} from 'vs/platform/instantiation/common/instantiation';
-import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
+import { Graph } from 'vs/base/common/graph';
+import { SyncDescriptor, AsyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
+import { ServiceIdentifier, IInstantiationService, ServicesAccessor, _util, optional } from 'vs/platform/instantiation/common/instantiation';
+import { ServiceCollection } from 'vs/platform/instantiation/common/serviceCollection';
 
 
 export class InstantiationService implements IInstantiationService {
 
-	serviceId: any;
+	_serviceBrand: any;
 
 	private _services: ServiceCollection;
 	private _strict: boolean;
@@ -30,9 +30,15 @@ export class InstantiationService implements IInstantiationService {
 
 	createChild(services: ServiceCollection): IInstantiationService {
 		this._services.forEach((id, thing) => {
-			if (!services.has(id)) {
-				services.set(id, thing);
+			if (services.has(id)) {
+				return;
 			}
+			// If we copy descriptors we might end up with
+			// multiple instances of the same service
+			if (thing instanceof SyncDescriptor) {
+				thing = this._createAndCacheServiceInstance(id, thing);
+			}
+			services.set(id, thing);
 		});
 		return new InstantiationService(services, this._strict);
 	}
@@ -57,7 +63,7 @@ export class InstantiationService implements IInstantiationService {
 		}
 	}
 
-	createInstance<T>(param: any, ...rest:any[]): any {
+	createInstance<T>(param: any, ...rest: any[]): any {
 
 		if (param instanceof AsyncDescriptor) {
 			// async
@@ -117,13 +123,15 @@ export class InstantiationService implements IInstantiationService {
 
 		// arguments defined by service decorators
 		let serviceDependencies = _util.getServiceDependencies(desc.ctor).sort((a, b) => a.index - b.index);
-		let serviceArgs = serviceDependencies.map(dependency => {
+		let serviceArgs: any[] = [];
+		for (const dependency of serviceDependencies) {
 			let service = this._getOrCreateServiceInstance(dependency.id);
 			if (!service && this._strict && !dependency.optional) {
 				throw new Error(`[createInstance] ${desc.ctor.name} depends on UNKNOWN service ${dependency.id}.`);
 			}
-			return service;
-		});
+			serviceArgs.push(service);
+		}
+
 		let firstServiceArgPos = serviceDependencies.length > 0 ? serviceDependencies[0].index : staticArgs.length;
 
 		// check for argument mismatches, adjust static args if needed
@@ -225,6 +233,6 @@ export class InstantiationService implements IInstantiationService {
 			}
 		}
 
-		return <T> this._services.get(id);
+		return <T>this._services.get(id);
 	}
 }

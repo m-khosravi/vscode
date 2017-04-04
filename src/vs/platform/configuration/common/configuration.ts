@@ -3,31 +3,44 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import {createDecorator, ServiceIdentifier} from 'vs/platform/instantiation/common/instantiation';
+import { TPromise } from 'vs/base/common/winjs.base';
+import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import Event from 'vs/base/common/event';
-import {TPromise} from 'vs/base/common/winjs.base';
 
 export const IConfigurationService = createDecorator<IConfigurationService>('configurationService');
 
+export interface IConfigurationOptions {
+	overrideIdentifier?: string;
+	section?: string;
+}
+
 export interface IConfigurationService {
-	serviceId: ServiceIdentifier<any>;
+	_serviceBrand: any;
 
 	/**
 	 * Fetches the appropriate section of the configuration JSON file.
 	 * This will be an object keyed off the section name.
 	 */
 	getConfiguration<T>(section?: string): T;
+	getConfiguration<T>(options?: IConfigurationOptions): T;
+
+	/**
+	 * Resolves a configuration key to its values in the different scopes
+	 * the setting is defined.
+	 */
+	lookup<T>(key: string, overrideIdentifier?: string): IConfigurationValue<T>;
+
+	/**
+	 * Returns the defined keys of configurations in the different scopes
+	 * the key is defined.
+	 */
+	keys(): IConfigurationKeys;
 
 	/**
 	 * Similar to #getConfiguration() but ensures that the latest configuration
 	 * from disk is fetched.
 	 */
-	loadConfiguration<T>(section?: string): TPromise<T>;
-
-	/**
-	 * Returns iff the workspace has configuration or not.
-	 */
-	hasWorkspaceConfiguration(): boolean;
+	reloadConfiguration<T>(section?: string): TPromise<T>;
 
 	/**
 	 * Event that fires when the configuration changes.
@@ -35,22 +48,71 @@ export interface IConfigurationService {
 	onDidUpdateConfiguration: Event<IConfigurationServiceEvent>;
 }
 
-export interface IConfigurationServiceEvent {
-	config: any;
+export enum ConfigurationSource {
+	Default = 1,
+	User,
+	Workspace
 }
 
-export function extractSetting(config: any, settingPath: string): any {
+export interface IConfigurationServiceEvent {
+	/**
+	 * The full configuration.
+	 */
+	config: any;
+	/**
+	 * The type of source that triggered this event.
+	 */
+	source: ConfigurationSource;
+	/**
+	 * The part of the configuration contributed by the source of this event.
+	 */
+	sourceConfig: any;
+}
+
+export interface IConfigurationValue<T> {
+	value: T;
+	default: T;
+	user: T;
+}
+
+export interface IConfigurationKeys {
+	default: string[];
+	user: string[];
+}
+
+/**
+ * A helper function to get the configuration value with a specific settings path (e.g. config.some.setting)
+ */
+export function getConfigurationValue<T>(config: any, settingPath: string, defaultValue?: T): T {
 	function accessSetting(config: any, path: string[]): any {
 		let current = config;
 		for (let i = 0; i < path.length; i++) {
-			current = current[path[i]];
-			if (!current) {
+			if (typeof current !== 'object' || current === null) {
 				return undefined;
 			}
+			current = current[path[i]];
 		}
-		return current;
+		return <T>current;
 	}
 
-	let path = settingPath.split('.');
-	return accessSetting(config, path);
+	const path = settingPath.split('.');
+	const result = accessSetting(config, path);
+
+	return typeof result === 'undefined' ? defaultValue : result;
+}
+
+export interface IConfigModel<T> {
+	contents: T;
+	overrides: IOverrides<T>[];
+	keys: string[];
+	errors: any[];
+
+	merge(other: IConfigModel<T>, overwrite?: boolean): IConfigModel<T>;
+	getContentsFor<V>(section: string): V;
+	configWithOverrides<V>(identifier: string, section?: string): IConfigModel<V>;
+}
+
+export interface IOverrides<T> {
+	contents: T;
+	identifiers: string[];
 }

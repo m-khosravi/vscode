@@ -4,9 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {Range} from 'vs/editor/common/core/range';
-import {Selection} from 'vs/editor/common/core/selection';
-import {ICommand, ICursorStateComputerData, IEditOperationBuilder, ITokenizedModel} from 'vs/editor/common/editorCommon';
+import { Range } from 'vs/editor/common/core/range';
+import { Selection } from 'vs/editor/common/core/selection';
+import { ICommand, ICursorStateComputerData, IEditOperationBuilder, ITokenizedModel } from 'vs/editor/common/editorCommon';
 
 export class MoveLinesCommand implements ICommand {
 
@@ -21,7 +21,7 @@ export class MoveLinesCommand implements ICommand {
 		this._isMovingDown = isMovingDown;
 	}
 
-	public getEditOperations(model:ITokenizedModel, builder:IEditOperationBuilder):void {
+	public getEditOperations(model: ITokenizedModel, builder: IEditOperationBuilder): void {
 
 		var modelLineCount = model.getLineCount();
 
@@ -57,7 +57,7 @@ export class MoveLinesCommand implements ICommand {
 				builder.addEditOperation(new Range(otherLineNumber, 1, otherLineNumber, model.getLineMaxColumn(otherLineNumber)), null);
 			}
 			// Track selection at the other line number
-			s = Selection.createSelection(otherLineNumber, 1, otherLineNumber, 1);
+			s = new Selection(otherLineNumber, 1, otherLineNumber, 1);
 
 		} else {
 
@@ -88,7 +88,7 @@ export class MoveLinesCommand implements ICommand {
 		this._selectionId = builder.trackSelection(s);
 	}
 
-	public computeCursorState(model:ITokenizedModel, helper: ICursorStateComputerData):Selection {
+	public computeCursorState(model: ITokenizedModel, helper: ICursorStateComputerData): Selection {
 		var result = helper.getTrackedSelection(this._selectionId);
 
 		if (this._moveEndPositionDown) {

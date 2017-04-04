@@ -5,14 +5,14 @@
 'use strict';
 
 import * as nls from 'vs/nls';
-import {IEditorOptions} from 'vs/editor/common/editorCommon';
+import { IEditorOptions } from 'vs/editor/common/editorCommon';
 import * as platform from 'vs/base/common/platform';
+import { USUAL_WORD_SEPARATORS } from 'vs/editor/common/model/wordHelper';
 
 export interface IConfiguration {
-	editor:IEditorOptions;
+	editor: IEditorOptions;
 }
 
-export const USUAL_WORD_SEPARATORS = '`~!@#$%^&*()-=+[{]}\\|;:\'",.<>/?';
 export const DEFAULT_INDENTATION = {
 	tabSize: 4,
 	insertSpaces: true,
@@ -40,10 +40,10 @@ class ConfigClass implements IConfiguration {
 			wordSeparators: USUAL_WORD_SEPARATORS,
 			selectionClipboard: true,
 			ariaLabel: nls.localize('editorViewAccessibleLabel', "Editor content"),
-			lineNumbers: true,
+			lineNumbers: 'on',
 			selectOnLineNumbers: true,
 			lineNumbersMinChars: 5,
-			glyphMargin: false,
+			glyphMargin: true,
 			lineDecorationsWidth: 10,
 			revealHorizontalRightPadding: 30,
 			roundedSelection: true,
@@ -56,42 +56,68 @@ class ConfigClass implements IConfiguration {
 				verticalHasArrows: false,
 				horizontalHasArrows: false
 			},
+			minimap: {
+				enabled: false,
+				renderCharacters: true,
+				maxColumn: 120
+			},
+			fixedOverflowWidgets: false,
 			overviewRulerLanes: 2,
+			overviewRulerBorder: true,
 			cursorBlinking: 'blink',
+			mouseWheelZoom: false,
 			cursorStyle: 'line',
+			mouseStyle: 'text',
 			fontLigatures: false,
+			disableTranslate3d: false,
+			disableMonospaceOptimizations: false,
 			hideCursorInOverviewRuler: false,
 			scrollBeyondLastLine: true,
 			automaticLayout: false,
-			wrappingColumn: 300,
+			wordWrap: 'off',
+			wordWrapColumn: 80,
+			wordWrapMinified: true,
 			wrappingIndent: 'same',
 			wordWrapBreakBeforeCharacters: '([{‘“〈《「『【〔（［｛｢£¥＄￡￥+＋',
 			wordWrapBreakAfterCharacters: ' \t})]?|&,;¢°′″‰℃、。｡､￠，．：；？！％・･ゝゞヽヾーァィゥェォッャュョヮヵヶぁぃぅぇぉっゃゅょゎゕゖㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ々〻ｧｨｩｪｫｬｭｮｯｰ’”〉》」』】〕）］｝｣',
 			wordWrapBreakObtrusiveCharacters: '.',
-			tabFocusMode: false,
 
 			// Features
 			hover: true,
 			contextmenu: true,
 			mouseWheelScrollSensitivity: 1,
-			quickSuggestions: true,
+			quickSuggestions: { other: true, comments: false, strings: false },
 			quickSuggestionsDelay: 10,
+			parameterHints: true,
 			iconsInSuggestions: true,
 			autoClosingBrackets: true,
 			formatOnType: false,
+			formatOnPaste: false,
 			suggestOnTriggerCharacters: true,
 			acceptSuggestionOnEnter: true,
+			acceptSuggestionOnCommitCharacter: true,
+			snippetSuggestions: 'bottom',
+			emptySelectionClipboard: true,
+			wordBasedSuggestions: true,
+			suggestFontSize: 0,
+			suggestLineHeight: 0,
 			selectionHighlight: true,
-			outlineMarkers: false,
+			occurrencesHighlight: true,
+			codeLens: true,
 			referenceInfos: true,
 			folding: true,
-			renderWhitespace: false,
-			indentGuides: false,
+			renderWhitespace: 'none',
+			renderControlCharacters: false,
+			renderIndentGuides: false,
+			renderLineHighlight: 'line',
 			useTabStops: true,
+			matchBrackets: true,
+			dragAndDrop: false,
 
 			fontFamily: (
 				platform.isMacintosh ? DEFAULT_MAC_FONT_FAMILY : (platform.isLinux ? DEFAULT_LINUX_FONT_FAMILY : DEFAULT_WINDOWS_FONT_FAMILY)
 			),
+			fontWeight: 'normal',
 			fontSize: (
 				platform.isMacintosh ? 12 : 14
 			),
@@ -100,4 +126,4 @@ class ConfigClass implements IConfiguration {
 	}
 }
 
-export var DefaultConfig: IConfiguration = new ConfigClass();
+export const DefaultConfig: IConfiguration = new ConfigClass();

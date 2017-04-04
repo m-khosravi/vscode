@@ -4,59 +4,22 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {IMode, IState, IStream, ITokenizationResult, ITokenizationSupport} from 'vs/editor/common/modes';
-import {AbstractState} from 'vs/editor/common/modes/abstractState';
-import {TokenizationSupport} from 'vs/editor/common/modes/supports/tokenizationSupport';
+import { Disposable } from 'vs/base/common/lifecycle';
+import { IMode, LanguageIdentifier } from 'vs/editor/common/modes';
 
-export class MockMode implements IMode {
+export class MockMode extends Disposable implements IMode {
+	private _languageIdentifier: LanguageIdentifier;
 
-	private _id:string;
-
-	constructor(id:string = 'mockMode') {
-		this._id = id;
+	constructor(languageIdentifier: LanguageIdentifier) {
+		super();
+		this._languageIdentifier = languageIdentifier;
 	}
 
-	public getId():string {
-		return this._id;
+	public getId(): string {
+		return this._languageIdentifier.language;
 	}
 
-	public toSimplifiedMode(): IMode {
-		return this;
-	}
-}
-
-export class StateForMockTokenizingMode extends AbstractState {
-
-	private _tokenType: string;
-
-	constructor(mode:IMode, tokenType:string) {
-		super(mode);
-		this._tokenType = tokenType;
-	}
-
-	public makeClone():StateForMockTokenizingMode {
-		return this;
-	}
-
-	public equals(other:IState):boolean {
-		return true;
-	}
-
-	public tokenize(stream:IStream):ITokenizationResult {
-		stream.advanceToEOS();
-		return { type: this._tokenType };
-	}
-}
-
-export class MockTokenizingMode extends MockMode {
-
-	public tokenizationSupport: ITokenizationSupport;
-
-	constructor(id:string, tokenType:string) {
-		super(id);
-
-		this.tokenizationSupport = new TokenizationSupport(this, {
-			getInitialState: () => new StateForMockTokenizingMode(this, tokenType)
-		}, false, false);
+	public getLanguageIdentifier(): LanguageIdentifier {
+		return this._languageIdentifier;
 	}
 }

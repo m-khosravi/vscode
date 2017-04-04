@@ -14,8 +14,8 @@ import WinJS = require('vs/base/common/winjs.base');
 import _ = require('./tree');
 
 interface IMap<T> { [id: string]: T; }
-interface IItemMap extends IMap<Item> {}
-interface ITraitMap extends IMap<IItemMap> {}
+interface IItemMap extends IMap<Item> { }
+interface ITraitMap extends IMap<IItemMap> { }
 
 export class LockData extends Events.EventEmitter {
 
@@ -128,6 +128,7 @@ export class Lock {
 
 export class ItemRegistry extends Events.EventEmitter {
 
+	private _isDisposed = false;
 	private items: IMap<{ item: Item; disposable: IDisposable; }>;
 
 	constructor() {
@@ -158,6 +159,11 @@ export class ItemRegistry extends Events.EventEmitter {
 	public dispose(): void {
 		super.dispose();
 		this.items = null;
+		this._isDisposed = true;
+	}
+
+	public isDisposed(): boolean {
+		return this._isDisposed;
 	}
 }
 
@@ -235,7 +241,7 @@ export class Item extends Events.EventEmitter {
 		this.userContent = null;
 		this.traits = {};
 		this.depth = 0;
-		this.expanded = false;
+		this.expanded = this.context.dataSource.shouldAutoexpand && this.context.dataSource.shouldAutoexpand(this.context.tree, element);
 
 		this.emit('item:create', { item: this });
 
@@ -391,6 +397,10 @@ export class Item extends Events.EventEmitter {
 			}
 
 			const result = childrenPromise.then((elements: any[]) => {
+				if (this.isDisposed() || this.registry.isDisposed()) {
+					return WinJS.TPromise.as(null);
+				}
+
 				elements = !elements ? [] : elements.slice(0);
 				elements = this.sort(elements);
 
@@ -838,12 +848,19 @@ export class TreeModel extends Events.EventEmitter {
 	}
 
 	public refreshAll(elements: any[], recursive: boolean = true): WinJS.Promise {
+		try {
+			this._beginDeferredEmit();
+			return this._refreshAll(elements, recursive);
+		} finally {
+			this._endDeferredEmit();
+		}
+	}
+
+	private _refreshAll(elements: any[], recursive: boolean): WinJS.Promise {
 		var promises = [];
-		this.deferredEmit(() => {
-			for (var i = 0, len = elements.length; i < len; i++) {
-				promises.push(this.refresh(elements[i], recursive));
-			}
-		});
+		for (var i = 0, len = elements.length; i < len; i++) {
+			promises.push(this.refresh(elements[i], recursive));
+		}
 		return WinJS.Promise.join(promises);
 	}
 
@@ -1187,6 +1204,17 @@ export class TreeModel extends Events.EventEmitter {
 		}
 	}
 
+	public focusFirstChild(eventPayload?: any): void {
+		const item = this.getItem(this.getFocus() || this.input);
+		const nav = this.getNavigator(item, false);
+		const next = nav.next();
+		const parent = nav.parent();
+
+		if (parent === item) {
+			this.setFocus(next, eventPayload);
+		}
+	}
+
 	public focusFirst(eventPayload?: any): void {
 		this.focusNth(0, eventPayload);
 	}
@@ -1216,7 +1244,7 @@ export class TreeModel extends Events.EventEmitter {
 		return new TreeNavigator(this.getItem(element), subTreeOnly);
 	}
 
-	private getItem(element: any = null): Item {
+	public getItem(element: any = null): Item {
 		if (element === null) {
 			return this.input;
 		} else if (element instanceof Item) {
@@ -1229,7 +1257,7 @@ export class TreeModel extends Events.EventEmitter {
 	}
 
 	public addTraits(trait: string, elements: any[]): void {
-		var items: IItemMap = this.traitsToItems[trait] || <IItemMap> {};
+		var items: IItemMap = this.traitsToItems[trait] || <IItemMap>{};
 		var item: Item;
 		for (var i = 0, len = elements.length; i < len; i++) {
 			item = this.getItem(elements[i]);
@@ -1243,7 +1271,7 @@ export class TreeModel extends Events.EventEmitter {
 	}
 
 	public removeTraits(trait: string, elements: any[]): void {
-		var items: IItemMap = this.traitsToItems[trait] || <IItemMap> {};
+		var items: IItemMap = this.traitsToItems[trait] || <IItemMap>{};
 		var item: Item;
 		var id: string;
 
@@ -1303,7 +1331,7 @@ export class TreeModel extends Events.EventEmitter {
 				}
 			}
 
-			var traitItems: IItemMap = this.traitsToItems[trait] || <IItemMap> {};
+			var traitItems: IItemMap = this.traitsToItems[trait] || <IItemMap>{};
 			var itemsToRemoveTrait: Item[] = [];
 			var id: string;
 

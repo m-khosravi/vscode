@@ -4,11 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {Remotable, IThreadService} from 'vs/platform/thread/common/thread';
-import {IStatusbarService, StatusbarAlignment as MainThreadStatusBarAlignment} from 'vs/platform/statusbar/common/statusbar';
-import {IDisposable} from 'vs/base/common/lifecycle';
-import {StatusBarAlignment as ExtHostStatusBarAlignment, Disposable} from './extHostTypes';
-import {StatusBarItem, StatusBarAlignment} from 'vscode';
+import { IThreadService } from 'vs/workbench/services/thread/common/threadService';
+import { StatusbarAlignment as MainThreadStatusBarAlignment } from 'vs/platform/statusbar/common/statusbar';
+import { StatusBarAlignment as ExtHostStatusBarAlignment, Disposable } from './extHostTypes';
+import { StatusBarItem, StatusBarAlignment } from 'vscode';
+import { MainContext, MainThreadStatusBarShape } from './extHost.protocol';
 
 export class ExtHostStatusBarEntry implements StatusBarItem {
 	private static ID_GEN = 0;
@@ -25,13 +25,16 @@ export class ExtHostStatusBarEntry implements StatusBarItem {
 	private _command: string;
 
 	private _timeoutHandle: number;
-	private _proxy: MainThreadStatusBar;
+	private _proxy: MainThreadStatusBarShape;
 
-	constructor(proxy: MainThreadStatusBar, alignment: ExtHostStatusBarAlignment = ExtHostStatusBarAlignment.Left, priority?: number) {
+	private _extensionId: string;
+
+	constructor(proxy: MainThreadStatusBarShape, extensionId: string, alignment: ExtHostStatusBarAlignment = ExtHostStatusBarAlignment.Left, priority?: number) {
 		this._id = ExtHostStatusBarEntry.ID_GEN++;
 		this._proxy = proxy;
 		this._alignment = alignment;
 		this._priority = priority;
+		this._extensionId = extensionId;
 	}
 
 	public get id(): number {
@@ -88,8 +91,9 @@ export class ExtHostStatusBarEntry implements StatusBarItem {
 	}
 
 	public hide(): void {
+		clearTimeout(this._timeoutHandle);
 		this._visible = false;
-		this._proxy.dispose(this.id);
+		this._proxy.$dispose(this.id);
 	}
 
 	private update(): void {
@@ -97,16 +101,14 @@ export class ExtHostStatusBarEntry implements StatusBarItem {
 			return;
 		}
 
-		if (this._timeoutHandle) {
-			clearTimeout(this._timeoutHandle);
-		}
+		clearTimeout(this._timeoutHandle);
 
 		// Defer the update so that multiple changes to setters dont cause a redraw each
 		this._timeoutHandle = setTimeout(() => {
-			this._timeoutHandle = null;
+			this._timeoutHandle = undefined;
 
 			// Set to status bar
-			this._proxy.setEntry(this.id, this.text, this.tooltip, this.command, this.color,
+			this._proxy.$setEntry(this.id, this._extensionId, this.text, this.tooltip, this.command, this.color,
 				this._alignment === ExtHostStatusBarAlignment.Left ? MainThreadStatusBarAlignment.LEFT : MainThreadStatusBarAlignment.RIGHT,
 				this._priority);
 		}, 0);
@@ -124,7 +126,7 @@ class StatusBarMessage {
 	private _messages: { message: string }[] = [];
 
 	constructor(statusBar: ExtHostStatusBar) {
-		this._item = statusBar.createStatusBarEntry(ExtHostStatusBarAlignment.Left, Number.MIN_VALUE);
+		this._item = statusBar.createStatusBarEntry(void 0, ExtHostStatusBarAlignment.Left, Number.MIN_VALUE);
 	}
 
 	dispose() {
@@ -158,16 +160,16 @@ class StatusBarMessage {
 
 export class ExtHostStatusBar {
 
-	private _proxy: MainThreadStatusBar;
+	private _proxy: MainThreadStatusBarShape;
 	private _statusMessage: StatusBarMessage;
 
-	constructor( @IThreadService threadService: IThreadService) {
-		this._proxy = threadService.getRemotable(MainThreadStatusBar);
+	constructor(threadService: IThreadService) {
+		this._proxy = threadService.get(MainContext.MainThreadStatusBar);
 		this._statusMessage = new StatusBarMessage(this);
 	}
 
-	createStatusBarEntry(alignment?: ExtHostStatusBarAlignment, priority?: number): StatusBarItem {
-		return new ExtHostStatusBarEntry(this._proxy, alignment, priority);
+	createStatusBarEntry(extensionId: string, alignment?: ExtHostStatusBarAlignment, priority?: number): StatusBarItem {
+		return new ExtHostStatusBarEntry(this._proxy, extensionId, alignment, priority);
 	}
 
 	setStatusBarMessage(text: string, timeoutOrThenable?: number | Thenable<any>): Disposable {
@@ -185,35 +187,5 @@ export class ExtHostStatusBar {
 			d.dispose();
 			clearTimeout(handle);
 		});
-	}
-}
-
-@Remotable.MainContext('MainThreadStatusBar')
-export class MainThreadStatusBar {
-	private mapIdToDisposable: { [id: number]: IDisposable };
-
-	constructor(
-		@IStatusbarService private statusbarService: IStatusbarService
-	) {
-		this.mapIdToDisposable = Object.create(null);
-	}
-
-	setEntry(id: number, text: string, tooltip: string, command: string, color: string, alignment: MainThreadStatusBarAlignment, priority: number): void {
-
-		// Dispose any old
-		this.dispose(id);
-
-		// Add new
-		let disposeable = this.statusbarService.addEntry({ text, tooltip, command, color }, alignment, priority);
-		this.mapIdToDisposable[id] = disposeable;
-	}
-
-	dispose(id: number) {
-		let disposeable = this.mapIdToDisposable[id];
-		if (disposeable) {
-			disposeable.dispose();
-		}
-
-		delete this.mapIdToDisposable[id];
 	}
 }

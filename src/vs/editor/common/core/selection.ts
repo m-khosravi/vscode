@@ -4,17 +4,44 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {Range} from 'vs/editor/common/core/range';
-import {ISelection, SelectionDirection} from 'vs/editor/common/editorCommon';
+import { Range } from 'vs/editor/common/core/range';
+import { ISelection } from 'vs/editor/common/editorCommon';
+
+/**
+ * The direction of a selection.
+ */
+export enum SelectionDirection {
+	/**
+	 * The selection starts above where it ends.
+	 */
+	LTR,
+	/**
+	 * The selection starts below where it ends.
+	 */
+	RTL
+}
 
 /**
  * A selection in the editor.
+ * The selection is a range that has an orientation.
  */
 export class Selection extends Range {
-	public selectionStartLineNumber: number;
-	public selectionStartColumn: number;
-	public positionLineNumber: number;
-	public positionColumn: number;
+	/**
+	 * The line number on which the selection has started.
+	 */
+	public readonly selectionStartLineNumber: number;
+	/**
+	 * The column on `selectionStartLineNumber` where the selection has started.
+	 */
+	public readonly selectionStartColumn: number;
+	/**
+	 * The line number on which the selection has ended.
+	 */
+	public readonly positionLineNumber: number;
+	/**
+	 * The column on `positionLineNumber` where the selection has ended.
+	 */
+	public readonly positionColumn: number;
 
 	constructor(selectionStartLineNumber: number, selectionStartColumn: number, positionLineNumber: number, positionColumn: number) {
 		super(selectionStartLineNumber, selectionStartColumn, positionLineNumber, positionColumn);
@@ -31,6 +58,9 @@ export class Selection extends Range {
 		return new Selection(this.selectionStartLineNumber, this.selectionStartColumn, this.positionLineNumber, this.positionColumn);
 	}
 
+	/**
+	 * Transform to a human-readable representation.
+	 */
 	public toString(): string {
 		return '[' + this.selectionStartLineNumber + ',' + this.selectionStartColumn + ' -> ' + this.positionLineNumber + ',' + this.positionColumn + ']';
 	}
@@ -41,6 +71,18 @@ export class Selection extends Range {
 	public equalsSelection(other: ISelection): boolean {
 		return (
 			Selection.selectionsEqual(this, other)
+		);
+	}
+
+	/**
+	 * Test if the two selections are equal.
+	 */
+	public static selectionsEqual(a: ISelection, b: ISelection): boolean {
+		return (
+			a.selectionStartLineNumber === b.selectionStartLineNumber &&
+			a.selectionStartColumn === b.selectionStartColumn &&
+			a.positionLineNumber === b.positionLineNumber &&
+			a.positionColumn === b.positionColumn
 		);
 	}
 
@@ -76,24 +118,17 @@ export class Selection extends Range {
 
 	// ----
 
-	public static createSelection(selectionStartLineNumber: number, selectionStartColumn: number, positionLineNumber: number, positionColumn: number): Selection {
-		return new Selection(selectionStartLineNumber, selectionStartColumn, positionLineNumber, positionColumn);
-	}
-
-	public static liftSelection(sel:ISelection): Selection {
+	/**
+	 * Create a `Selection` from an `ISelection`.
+	 */
+	public static liftSelection(sel: ISelection): Selection {
 		return new Selection(sel.selectionStartLineNumber, sel.selectionStartColumn, sel.positionLineNumber, sel.positionColumn);
 	}
 
-	public static selectionsEqual(a:ISelection, b:ISelection): boolean {
-		return (
-			a.selectionStartLineNumber === b.selectionStartLineNumber &&
-			a.selectionStartColumn === b.selectionStartColumn &&
-			a.positionLineNumber === b.positionLineNumber &&
-			a.positionColumn === b.positionColumn
-		);
-	}
-
-	public static selectionsArrEqual(a:ISelection[], b:ISelection[]): boolean {
+	/**
+	 * `a` equals `b`.
+	 */
+	public static selectionsArrEqual(a: ISelection[], b: ISelection[]): boolean {
 		if (a && !b || !a && b) {
 			return false;
 		}
@@ -111,7 +146,10 @@ export class Selection extends Range {
 		return true;
 	}
 
-	public static isISelection(obj: any): boolean {
+	/**
+	 * Test if `obj` is an `ISelection`.
+	 */
+	public static isISelection(obj: any): obj is ISelection {
 		return (
 			obj
 			&& (typeof obj.selectionStartLineNumber === 'number')
@@ -121,7 +159,10 @@ export class Selection extends Range {
 		);
 	}
 
-	public static createWithDirection(startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number, direction:SelectionDirection): Selection {
+	/**
+	 * Create with a direction.
+	 */
+	public static createWithDirection(startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number, direction: SelectionDirection): Selection {
 
 		if (direction === SelectionDirection.LTR) {
 			return new Selection(startLineNumber, startColumn, endLineNumber, endColumn);

@@ -11,7 +11,8 @@ export function clone<T>(obj: T): T {
 		return obj;
 	}
 	if (obj instanceof RegExp) {
-		return obj;
+		// See https://github.com/Microsoft/TypeScript/issues/10990
+		return obj as any;
 	}
 	var result = (Array.isArray(obj)) ? <any>[] : <any>{};
 	Object.keys(obj).forEach((key) => {
@@ -147,8 +148,8 @@ export function assign(destination: any, ...sources: any[]): any {
 	return destination;
 }
 
-export function toObject<T,R>(arr: T[], keyMap: (T) => string, valueMap: (T) => R = x => x): { [key: string]: R } {
-	return arr.reduce((o, d) => assign(o, { [keyMap(d)]: valueMap(d) }), Object.create(null));
+export function toObject<T>(arr: T[], keyMap: (t: T) => string): { [key: string]: T } {
+	return arr.reduce((o, d) => assign(o, { [keyMap(d)]: d }), Object.create(null));
 }
 
 export function equals(one: any, other: any): boolean {
@@ -181,13 +182,13 @@ export function equals(one: any, other: any): boolean {
 			}
 		}
 	} else {
-		var oneKeys:string[] = [];
+		var oneKeys: string[] = [];
 
 		for (key in one) {
 			oneKeys.push(key);
 		}
 		oneKeys.sort();
-		var otherKeys:string[] = [];
+		var otherKeys: string[] = [];
 		for (key in other) {
 			otherKeys.push(key);
 		}
@@ -287,7 +288,38 @@ export function safeStringify(obj: any): string {
 	});
 }
 
-export function getOrDefault<T,R>(obj: T, fn: (obj: T) => R, defaultValue: R = null): R {
+export function getOrDefault<T, R>(obj: T, fn: (obj: T) => R, defaultValue: R = null): R {
 	const result = fn(obj);
 	return typeof result === 'undefined' ? defaultValue : result;
+}
+
+/**
+ * Returns an object that has keys for each value that is different in the base object. Keys
+ * that do not exist in the target but in the base object are not considered.
+ *
+ * Note: This is not a deep-diffing method, so the values are strictly taken into the resulting
+ * object if they differ.
+ *
+ * @param base the object to diff against
+ * @param obj the object to use for diffing
+ */
+export type obj = { [key: string]: any; };
+export function distinct<T>(base: obj, target: obj): obj {
+	const result = Object.create(null);
+
+	if (!base || !target) {
+		return result;
+	}
+
+	const targetKeys = Object.keys(target);
+	targetKeys.forEach(k => {
+		const baseValue = base[k];
+		const targetValue = target[k];
+
+		if (!equals(baseValue, targetValue)) {
+			result[k] = targetValue;
+		}
+	});
+
+	return result;
 }

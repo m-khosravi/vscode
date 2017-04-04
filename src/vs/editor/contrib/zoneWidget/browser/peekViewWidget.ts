@@ -7,25 +7,34 @@
 
 import 'vs/css!./peekViewWidget';
 import * as nls from 'vs/nls';
-import {Action} from 'vs/base/common/actions';
+import { Action } from 'vs/base/common/actions';
 import * as strings from 'vs/base/common/strings';
-import {$} from 'vs/base/browser/builder';
-import Event, {Emitter} from 'vs/base/common/event';
+import * as objects from 'vs/base/common/objects';
+import { $ } from 'vs/base/browser/builder';
+import Event, { Emitter } from 'vs/base/common/event';
 import * as dom from 'vs/base/browser/dom';
-import {ActionBar} from 'vs/base/browser/ui/actionbar/actionbar';
-import {ServiceIdentifier, ServicesAccessor, createDecorator} from 'vs/platform/instantiation/common/instantiation';
-import {ICommonCodeEditor} from 'vs/editor/common/editorCommon';
-import {ICodeEditorService} from 'vs/editor/common/services/codeEditorService';
-import {ICodeEditor} from 'vs/editor/browser/editorBrowser';
-import {IOptions, ZoneWidget} from './zoneWidget';
-import {EmbeddedCodeEditorWidget} from 'vs/editor/browser/widget/embeddedCodeEditorWidget';
+import { ActionBar } from 'vs/base/browser/ui/actionbar/actionbar';
+import { ServicesAccessor, createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { ICommonCodeEditor } from 'vs/editor/common/editorCommon';
+import { ICodeEditorService } from 'vs/editor/common/services/codeEditorService';
+import { ICodeEditor } from 'vs/editor/browser/editorBrowser';
+import { IOptions, ZoneWidget, IStyles } from './zoneWidget';
+import { EmbeddedCodeEditorWidget } from 'vs/editor/browser/widget/embeddedCodeEditorWidget';
+import { ContextKeyExpr, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
+import { Color } from "vs/base/common/color";
 
 export var IPeekViewService = createDecorator<IPeekViewService>('peekViewService');
 
+export namespace PeekContext {
+	export const inPeekEditor = new RawContextKey<boolean>('inReferenceSearchEditor', true);
+	export const notInPeekEditor: ContextKeyExpr = inPeekEditor.toNegated();
+}
+
+export const NOT_INNER_EDITOR_CONTEXT_KEY = new RawContextKey<boolean>('inReferenceSearchEditor', true);
+
 export interface IPeekViewService {
-	serviceId: ServiceIdentifier<any>;
+	_serviceBrand: any;
 	isActive: boolean;
-	contextKey: string;
 }
 
 export function getOuterEditor(accessor: ServicesAccessor, args: any): ICommonCodeEditor {
@@ -36,10 +45,24 @@ export function getOuterEditor(accessor: ServicesAccessor, args: any): ICommonCo
 	return editor;
 }
 
-export class PeekViewWidget extends ZoneWidget implements IPeekViewService {
+export interface IPeekViewStyles extends IStyles {
+	headerBackgroundColor?: Color;
+	primaryHeadingColor?: Color;
+	secondaryHeadingColor?: Color;
+}
 
-	public serviceId = IPeekViewService;
-	public contextKey: string;
+export interface IPeekViewOptions extends IOptions, IPeekViewStyles {
+}
+
+const defaultOptions: IPeekViewOptions = {
+	headerBackgroundColor: Color.white,
+	primaryHeadingColor: Color.fromHex('#333333'),
+	secondaryHeadingColor: Color.fromHex('#6c6c6cb3')
+};
+
+export abstract class PeekViewWidget extends ZoneWidget implements IPeekViewService {
+
+	public _serviceBrand: any;
 
 	private _onDidClose = new Emitter<PeekViewWidget>();
 	private _isActive = false;
@@ -51,9 +74,9 @@ export class PeekViewWidget extends ZoneWidget implements IPeekViewService {
 	protected _actionbarWidget: ActionBar;
 	protected _bodyElement: HTMLDivElement;
 
-	constructor(editor: ICodeEditor, contextKey: string, options: IOptions = {}) {
+	constructor(editor: ICodeEditor, options: IPeekViewOptions = {}) {
 		super(editor, options);
-		this.contextKey = contextKey;
+		objects.mixin(this.options, defaultOptions, false);
 	}
 
 	public dispose(): void {
@@ -75,8 +98,39 @@ export class PeekViewWidget extends ZoneWidget implements IPeekViewService {
 		super.show(where, heightInLines);
 	}
 
+	public style(styles: IPeekViewStyles) {
+		let options = <IPeekViewOptions>this.options;
+		if (styles.headerBackgroundColor) {
+			options.headerBackgroundColor = styles.headerBackgroundColor;
+		}
+		if (styles.primaryHeadingColor) {
+			options.primaryHeadingColor = styles.primaryHeadingColor;
+		}
+		if (styles.secondaryHeadingColor) {
+			options.secondaryHeadingColor = styles.secondaryHeadingColor;
+		}
+		super.style(styles);
+	}
+
+	protected _applyStyles() {
+		super._applyStyles();
+		let options = <IPeekViewOptions>this.options;
+		if (this._headElement) {
+			this._headElement.style.backgroundColor = options.headerBackgroundColor.toString();
+		}
+		if (this._primaryHeading) {
+			this._primaryHeading.style.color = options.primaryHeadingColor.toString();
+		}
+		if (this._secondaryHeading) {
+			this._secondaryHeading.style.color = options.secondaryHeadingColor.toString();
+		}
+		if (this._bodyElement) {
+			this._bodyElement.style.borderColor = options.frameColor.toString();
+		}
+	}
+
 	protected _fillContainer(container: HTMLElement): void {
-		$(container).addClass('peekview-widget');
+		this.setCssClass('peekview-widget');
 
 		this._headElement = <HTMLDivElement>$('.head').getHTMLElement();
 		this._bodyElement = <HTMLDivElement>$('.body').getHTMLElement();
@@ -136,7 +190,7 @@ export class PeekViewWidget extends ZoneWidget implements IPeekViewService {
 
 	public _doLayout(heightInPixel: number, widthInPixel: number): void {
 
-		if (heightInPixel < 0) {
+		if (!this._isShowing && heightInPixel < 0) {
 			// Looks like the view zone got folded away!
 			this.dispose();
 			this._onDidClose.fire(this);

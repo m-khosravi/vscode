@@ -3,22 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { toObject, assign } from 'vs/base/common/objects';
+import { toObject, assign, getOrDefault } from 'vs/base/common/objects';
 import { IDisposable, dispose } from 'vs/base/common/lifecycle';
-import { Gesture } from 'vs/base/browser/touch';
+import { Gesture, EventType as TouchEventType, GestureEvent } from 'vs/base/browser/touch';
 import * as DOM from 'vs/base/browser/dom';
+import { domEvent } from 'vs/base/browser/event';
 import { ScrollableElement } from 'vs/base/browser/ui/scrollbar/scrollableElement';
-import { ScrollbarVisibility } from 'vs/base/browser/ui/scrollbar/scrollableElementOptions';
-import { RangeMap, IRange } from './rangeMap';
+import { ScrollEvent, ScrollbarVisibility } from 'vs/base/common/scrollable';
+import { RangeMap, IRange, relativeComplement, each } from './rangeMap';
 import { IDelegate, IRenderer } from './list';
 import { RowCache, IRow } from './rowCache';
-import { LcsDiff, ISequence } from 'vs/base/common/diff/diff';
-
-interface IItemRange<T> {
-	item: IItem<T>;
-	index: number;
-	range: IRange;
-}
 
 interface IItem<T> {
 	id: string;
@@ -26,13 +20,6 @@ interface IItem<T> {
 	size: number;
 	templateId: string;
 	row: IRow;
-}
-
-function toSequence<T>(itemRanges: IItemRange<T>[]): ISequence {
-	return {
-		getLength: () => itemRanges.length,
-		getElementHash: i => `${ itemRanges[i].item.id }:${ itemRanges[i].range.start }:${ itemRanges[i].range.end }`
-	};
 }
 
 const MouseEventTypes = [
@@ -46,6 +33,14 @@ const MouseEventTypes = [
 	'contextmenu'
 ];
 
+export interface IListViewOptions {
+	useShadows?: boolean;
+}
+
+const DefaultOptions: IListViewOptions = {
+	useShadows: true
+};
+
 export class ListView<T> implements IDisposable {
 
 	private items: IItem<T>[];
@@ -53,27 +48,24 @@ export class ListView<T> implements IDisposable {
 	private rangeMap: RangeMap;
 	private cache: RowCache<T>;
 	private renderers: { [templateId: string]: IRenderer<T, any>; };
-
 	private lastRenderTop: number;
 	private lastRenderHeight: number;
-
 	private _domNode: HTMLElement;
 	private gesture: Gesture;
 	private rowsContainer: HTMLElement;
 	private scrollableElement: ScrollableElement;
-
-
-	private toDispose: IDisposable[];
+	private disposables: IDisposable[];
 
 	constructor(
 		container: HTMLElement,
 		private delegate: IDelegate<T>,
-		renderers: IRenderer<T, any>[]
+		renderers: IRenderer<T, any>[],
+		options: IListViewOptions = DefaultOptions
 	) {
 		this.items = [];
 		this.itemId = 0;
 		this.rangeMap = new RangeMap();
-		this.renderers = toObject<IRenderer<T, any>, IRenderer<T, any>>(renderers, r => r.templateId);
+		this.renderers = toObject<IRenderer<T, any>>(renderers, r => r.templateId);
 		this.cache = new RowCache(this.renderers);
 
 		this.lastRenderTop = 0;
@@ -81,7 +73,6 @@ export class ListView<T> implements IDisposable {
 
 		this._domNode = document.createElement('div');
 		this._domNode.className = 'monaco-list';
-		this._domNode.tabIndex = 0;
 
 		this.rowsContainer = document.createElement('div');
 		this.rowsContainer.className = 'monaco-list-rows';
@@ -89,18 +80,19 @@ export class ListView<T> implements IDisposable {
 
 		this.scrollableElement = new ScrollableElement(this.rowsContainer, {
 			canUseTranslate3d: false,
+			alwaysConsumeMouseWheel: true,
 			horizontal: ScrollbarVisibility.Hidden,
 			vertical: ScrollbarVisibility.Auto,
-			useShadows: false,
-			saveLastScrollTimeOnClassName: 'monaco-list-row'
+			useShadows: getOrDefault(options, o => o.useShadows, DefaultOptions.useShadows)
 		});
-
-		const listener = this.scrollableElement.onScroll(e => this.render(e.scrollTop, e.height));
 
 		this._domNode.appendChild(this.scrollableElement.getDomNode());
 		container.appendChild(this._domNode);
 
-		this.toDispose = [this.rangeMap, this.gesture, listener, this.scrollableElement];
+		this.disposables = [this.rangeMap, this.gesture, this.scrollableElement];
+
+		this.scrollableElement.onScroll(this.onScroll, this, this.disposables);
+		domEvent(this.rowsContainer, TouchEventType.Change)(this.onTouchChange, this, this.disposables);
 
 		this.layout();
 	}
@@ -109,8 +101,10 @@ export class ListView<T> implements IDisposable {
 		return this._domNode;
 	}
 
-	splice(start: number, deleteCount: number, ...elements: T[]): T[] {
-		const before = this.getRenderedItemRanges();
+	splice(start: number, deleteCount: number, elements: T[] = []): T[] {
+		const previousRenderRange = this.getRenderRange(this.lastRenderTop, this.lastRenderHeight);
+		each(previousRenderRange, i => this.removeItemFromDOM(this.items[i]));
+
 		const inserted = elements.map<IItem<T>>(element => ({
 			id: String(this.itemId++),
 			element,
@@ -120,24 +114,14 @@ export class ListView<T> implements IDisposable {
 		}));
 
 		this.rangeMap.splice(start, deleteCount, ...inserted);
+
 		const deleted = this.items.splice(start, deleteCount, ...inserted);
 
-		const after = this.getRenderedItemRanges();
-		const lcs = new LcsDiff(toSequence(before), toSequence(after), null);
-		const diffs = lcs.ComputeDiff();
-
-		for (const diff of diffs) {
-			for (let i = 0; i < diff.originalLength; i++) {
-				this.removeItemFromDOM(before[diff.originalStart + i].item);
-			}
-
-			for (let i = 0; i < diff.modifiedLength; i++) {
-				this.insertItemInDOM(after[diff.modifiedStart + i].item, after[0].index + diff.modifiedStart + i);
-			}
-		}
+		const renderRange = this.getRenderRange(this.lastRenderTop, this.lastRenderHeight);
+		each(renderRange, i => this.insertItemInDOM(this.items[i], i));
 
 		const scrollHeight = this.getContentHeight();
-		this.rowsContainer.style.height = `${ scrollHeight }px`;
+		this.rowsContainer.style.height = `${scrollHeight}px`;
 		this.scrollableElement.updateState({ scrollHeight });
 
 		return deleted.map(i => i.element);
@@ -148,11 +132,17 @@ export class ListView<T> implements IDisposable {
 	}
 
 	get renderHeight(): number {
-		return this.scrollableElement.getHeight();
+		const scrollState = this.scrollableElement.getScrollState();
+		return scrollState.height;
 	}
 
 	element(index: number): T {
 		return this.items[index].element;
+	}
+
+	domElement(index: number): HTMLElement {
+		const row = this.items[index].row;
+		return row && row.domNode;
 	}
 
 	elementHeight(index: number): number {
@@ -180,52 +170,20 @@ export class ListView<T> implements IDisposable {
 	// Render
 
 	private render(renderTop: number, renderHeight: number): void {
-		const renderBottom = renderTop + renderHeight;
-		const thisRenderBottom = this.lastRenderTop + this.lastRenderHeight;
-		let i: number, stop: number;
+		const previousRenderRange = this.getRenderRange(this.lastRenderTop, this.lastRenderHeight);
+		const renderRange = this.getRenderRange(renderTop, renderHeight);
 
-		// when view scrolls down, start rendering from the renderBottom
-		for (i = this.rangeMap.indexAfter(renderBottom) - 1, stop = this.rangeMap.indexAt(Math.max(thisRenderBottom, renderTop)); i >= stop; i--) {
-			this.insertItemInDOM(this.items[i], i);
-		}
+		const rangesToInsert = relativeComplement(renderRange, previousRenderRange);
+		const rangesToRemove = relativeComplement(previousRenderRange, renderRange);
 
-		// when view scrolls up, start rendering from either this.renderTop or renderBottom
-		for (i = Math.min(this.rangeMap.indexAt(this.lastRenderTop), this.rangeMap.indexAfter(renderBottom)) - 1, stop = this.rangeMap.indexAt(renderTop); i >= stop; i--) {
-			this.insertItemInDOM(this.items[i], i);
-		}
+		rangesToInsert.forEach(range => each(range, i => this.insertItemInDOM(this.items[i], i)));
+		rangesToRemove.forEach(range => each(range, i => this.removeItemFromDOM(this.items[i])));
 
-		// when view scrolls down, start unrendering from renderTop
-		for (i = this.rangeMap.indexAt(this.lastRenderTop), stop = Math.min(this.rangeMap.indexAt(renderTop), this.rangeMap.indexAfter(thisRenderBottom)); i < stop; i++) {
-			this.removeItemFromDOM(this.items[i]);
-		}
-
-		// when view scrolls up, start unrendering from either renderBottom this.renderTop
-		for (i = Math.max(this.rangeMap.indexAfter(renderBottom), this.rangeMap.indexAt(this.lastRenderTop)), stop = this.rangeMap.indexAfter(thisRenderBottom); i < stop; i++) {
-			this.removeItemFromDOM(this.items[i]);
-		}
-
-		this.rowsContainer.style.transform = `translate3d(0px, -${ renderTop }px, 0px)`;
+		const transform = `translate3d(0px, -${renderTop}px, 0px)`;
+		this.rowsContainer.style.transform = transform;
+		this.rowsContainer.style.webkitTransform = transform;
 		this.lastRenderTop = renderTop;
-		this.lastRenderHeight = renderBottom - renderTop;
-	}
-
-	private getRenderedItemRanges(): IItemRange<T>[] {
-		const result: IItemRange<T>[] = [];
-		const renderBottom = this.lastRenderTop + this.lastRenderHeight;
-
-		let start = this.lastRenderTop;
-		let index = this.rangeMap.indexAt(start);
-		let item = this.items[index];
-		let end = -1;
-
-		while (item && start <= renderBottom) {
-			end = start + item.size;
-			result.push({ item, index, range: { start, end }});
-			start = end;
-			item = this.items[++index];
-		}
-
-		return result;
+		this.lastRenderHeight = renderHeight;
 	}
 
 	// DOM operations
@@ -240,8 +198,8 @@ export class ListView<T> implements IDisposable {
 		}
 
 		const renderer = this.renderers[item.templateId];
-		item.row.domNode.style.top = `${ this.elementTop(index) }px`;
-		item.row.domNode.style.height = `${ item.size }px`;
+		item.row.domNode.style.top = `${this.elementTop(index)}px`;
+		item.row.domNode.style.height = `${item.size}px`;
 		item.row.domNode.setAttribute('data-index', `${index}`);
 		renderer.renderElement(item.element, index, item.row.templateData);
 	}
@@ -256,36 +214,73 @@ export class ListView<T> implements IDisposable {
 	}
 
 	getScrollTop(): number {
-		return this.scrollableElement.getScrollTop();
+		const scrollState = this.scrollableElement.getScrollState();
+		return scrollState.scrollTop;
 	}
 
 	setScrollTop(scrollTop: number): void {
 		this.scrollableElement.updateState({ scrollTop });
 	}
 
-	// Events
-
-	addListener(type: string, handler: (event:any)=>void, useCapture?: boolean): IDisposable {
-		if (MouseEventTypes.indexOf(type) > -1) {
-			const userHandler = handler;
-			handler = (event: MouseEvent) => {
-				const index = this.getItemIndex(event);
-
-				if (index < 0) {
-					return;
-				}
-
-				const element = this.items[index].element;
-				userHandler(assign(event, { element, index }));
-			};
-		}
-
-		return DOM.addDisposableListener(this.domNode, type, handler, useCapture);
+	get scrollTop(): number {
+		return this.getScrollTop();
 	}
 
-	private getItemIndex(event: MouseEvent): number {
-		let target = event.target;
+	set scrollTop(scrollTop: number) {
+		this.setScrollTop(scrollTop);
+	}
 
+	// Events
+
+	addListener(type: string, handler: (event: any) => void, useCapture?: boolean): IDisposable {
+		const userHandler = handler;
+		let domNode = this.domNode;
+
+		if (MouseEventTypes.indexOf(type) > -1) {
+			handler = e => this.fireScopedEvent(e, userHandler, this.getItemIndexFromMouseEvent(e));
+		} else if (type === TouchEventType.Tap) {
+			domNode = this.rowsContainer;
+			handler = e => this.fireScopedEvent(e, userHandler, this.getItemIndexFromGestureEvent(e));
+		}
+
+		return DOM.addDisposableListener(domNode, type, handler, useCapture);
+	}
+
+	private fireScopedEvent(
+		event: any,
+		handler: (event: any) => void,
+		index: number
+	) {
+		if (index < 0) {
+			return;
+		}
+
+		const element = this.items[index].element;
+		handler(assign(event, { element, index }));
+	}
+
+	private onScroll(e: ScrollEvent): void {
+		this.render(e.scrollTop, e.height);
+	}
+
+	private onTouchChange(event: GestureEvent): void {
+		event.preventDefault();
+		event.stopPropagation();
+
+		this.scrollTop -= event.translationY;
+	}
+
+	// Util
+
+	private getItemIndexFromMouseEvent(event: MouseEvent): number {
+		return this.getItemIndexFromEventTarget(event.target);
+	}
+
+	private getItemIndexFromGestureEvent(event: GestureEvent): number {
+		return this.getItemIndexFromEventTarget(event.initialTarget);
+	}
+
+	private getItemIndexFromEventTarget(target: EventTarget): number {
 		while (target instanceof HTMLElement && target !== this.rowsContainer) {
 			const element = target as HTMLElement;
 			const rawIndex = element.getAttribute('data-index');
@@ -304,6 +299,13 @@ export class ListView<T> implements IDisposable {
 		return -1;
 	}
 
+	private getRenderRange(renderTop: number, renderHeight: number): IRange {
+		return {
+			start: this.rangeMap.indexAt(renderTop),
+			end: this.rangeMap.indexAfter(renderTop + renderHeight - 1)
+		};
+	}
+
 	// Dispose
 
 	dispose() {
@@ -314,6 +316,6 @@ export class ListView<T> implements IDisposable {
 			this._domNode = null;
 		}
 
-		this.toDispose = dispose(this.toDispose);
+		this.disposables = dispose(this.disposables);
 	}
 }

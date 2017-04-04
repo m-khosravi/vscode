@@ -4,25 +4,26 @@
  *--------------------------------------------------------------------------------------------*/
 
 import nls = require('vs/nls');
-import {TPromise} from 'vs/base/common/winjs.base';
+import { TPromise } from 'vs/base/common/winjs.base';
 import DOM = require('vs/base/browser/dom');
 import errors = require('vs/base/common/errors');
-import {Registry} from 'vs/platform/platform';
-import {Dimension, Builder, $} from 'vs/base/browser/builder';
-import {IAction, IActionRunner, Action} from 'vs/base/common/actions';
-import {IActionItem, ActionsOrientation} from 'vs/base/browser/ui/actionbar/actionbar';
-import {ITree, IFocusEvent, ISelectionEvent} from 'vs/base/parts/tree/browser/tree';
-import {prepareActions} from 'vs/workbench/browser/actionBarRegistry';
-import {ToolBar} from 'vs/base/browser/ui/toolbar/toolbar';
-import {DelayedDragHandler} from 'vs/base/browser/dnd';
-import {dispose, IDisposable} from 'vs/base/common/lifecycle';
-import {CollapsibleView, CollapsibleState, FixedCollapsibleView, IView} from 'vs/base/browser/ui/splitview/splitview';
-import {IViewletService} from 'vs/workbench/services/viewlet/common/viewletService';
-import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
-import {IViewlet} from 'vs/workbench/common/viewlet';
-import {Composite, CompositeDescriptor, CompositeRegistry} from 'vs/workbench/browser/composite';
-import {IContextMenuService} from 'vs/platform/contextview/browser/contextView';
-import {IMessageService} from 'vs/platform/message/common/message';
+import { Registry } from 'vs/platform/platform';
+import { Dimension, Builder, $ } from 'vs/base/browser/builder';
+import { IAction, IActionRunner, Action } from 'vs/base/common/actions';
+import { IActionItem, ActionsOrientation } from 'vs/base/browser/ui/actionbar/actionbar';
+import { ITree, IFocusEvent, ISelectionEvent } from 'vs/base/parts/tree/browser/tree';
+import { prepareActions } from 'vs/workbench/browser/actionBarRegistry';
+import { ToolBar } from 'vs/base/browser/ui/toolbar/toolbar';
+import { DelayedDragHandler } from 'vs/base/browser/dnd';
+import { dispose, IDisposable } from 'vs/base/common/lifecycle';
+import { CollapsibleView, CollapsibleState, FixedCollapsibleView, IView } from 'vs/base/browser/ui/splitview/splitview';
+import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
+import { IWorkbenchEditorService } from 'vs/workbench/services/editor/common/editorService';
+import { IViewlet } from 'vs/workbench/common/viewlet';
+import { Composite, CompositeDescriptor, CompositeRegistry } from 'vs/workbench/browser/composite';
+import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
+import { IMessageService } from 'vs/platform/message/common/message';
+import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 
 export abstract class Viewlet extends Composite implements IViewlet {
 
@@ -99,7 +100,7 @@ export abstract class ViewerViewlet extends Viewlet {
 		}
 
 		// Make sure the current selected element is revealed
-		let selection = this.viewer.getSelection();
+		const selection = this.viewer.getSelection();
 		if (selection.length > 0) {
 			this.reveal(selection[0], 0.5).done(null, errors.onUnexpectedError);
 		}
@@ -150,7 +151,28 @@ export abstract class ViewerViewlet extends Viewlet {
 /**
  * A viewlet descriptor is a leightweight descriptor of a viewlet in the workbench.
  */
-export class ViewletDescriptor extends CompositeDescriptor<Viewlet> { }
+export class ViewletDescriptor extends CompositeDescriptor<Viewlet> {
+
+	constructor(
+		moduleId: string,
+		ctorName: string,
+		id: string,
+		name: string,
+		cssClass?: string,
+		order?: number,
+		private _extensionId?: string
+	) {
+		super(moduleId, ctorName, id, name, cssClass, order);
+
+		if (_extensionId) {
+			this.appendStaticArguments([id]); // Pass viewletId to external viewlet, which doesn't know its id until runtime.
+		}
+	}
+
+	public get extensionId(): string {
+		return this._extensionId;
+	}
+}
 
 export const Extensions = {
 	Viewlets: 'workbench.contributions.viewlets'
@@ -170,14 +192,14 @@ export class ViewletRegistry extends CompositeRegistry<Viewlet> {
 	 * Returns the viewlet descriptor for the given id or null if none.
 	 */
 	public getViewlet(id: string): ViewletDescriptor {
-		return this.getComposite(id);
+		return this.getComposite(id) as ViewletDescriptor;
 	}
 
 	/**
 	 * Returns an array of registered viewlets known to the platform.
 	 */
 	public getViewlets(): ViewletDescriptor[] {
-		return this.getComposits();
+		return this.getComposites() as ViewletDescriptor[];
 	}
 
 	/**
@@ -207,7 +229,7 @@ export class ToggleViewletAction extends Action {
 		id: string,
 		name: string,
 		viewletId: string,
-		@IViewletService private viewletService: IViewletService,
+		@IViewletService protected viewletService: IViewletService,
 		@IWorkbenchEditorService private editorService: IWorkbenchEditorService
 	) {
 		super(id, name);
@@ -224,7 +246,7 @@ export class ToggleViewletAction extends Action {
 		}
 
 		// Otherwise pass focus to editor if possible
-		let editor = this.editorService.getActiveEditor();
+		const editor = this.editorService.getActiveEditor();
 		if (editor) {
 			editor.focus();
 		}
@@ -233,14 +255,14 @@ export class ToggleViewletAction extends Action {
 	}
 
 	private otherViewletShowing(): boolean {
-		let activeViewlet = this.viewletService.getActiveViewlet();
+		const activeViewlet = this.viewletService.getActiveViewlet();
 
 		return !activeViewlet || activeViewlet.getId() !== this.viewletId;
 	}
 
 	private sidebarHasFocus(): boolean {
-		let activeViewlet = this.viewletService.getActiveViewlet();
-		let activeElement = document.activeElement;
+		const activeViewlet = this.viewletService.getActiveViewlet();
+		const activeElement = document.activeElement;
 
 		return activeViewlet && activeElement && DOM.isAncestor(activeElement, (<Viewlet>activeViewlet).getContainer().getHTMLElement());
 	}
@@ -296,8 +318,8 @@ export abstract class AdaptiveCollapsibleViewletView extends FixedCollapsibleVie
 		initialBodySize: number,
 		collapsed: boolean,
 		private viewName: string,
-		@IMessageService private messageService: IMessageService,
-		@IContextMenuService protected contextMenuService: IContextMenuService
+		private keybindingService: IKeybindingService,
+		protected contextMenuService: IContextMenuService
 	) {
 		super({
 			expandedBodySize: initialBodySize,
@@ -320,7 +342,8 @@ export abstract class AdaptiveCollapsibleViewletView extends FixedCollapsibleVie
 		this.toolBar = new ToolBar($('div.actions').appendTo(container).getHTMLElement(), this.contextMenuService, {
 			orientation: ActionsOrientation.HORIZONTAL,
 			actionItemProvider: (action) => { return this.getActionItem(action); },
-			ariaLabel: nls.localize('viewToolbarAriaLabel', "{0} actions", this.viewName)
+			ariaLabel: nls.localize('viewToolbarAriaLabel', "{0} actions", this.viewName),
+			getKeyBinding: (action) => this.keybindingService.lookupKeybinding(action.id)
 		});
 		this.toolBar.actionRunner = this.actionRunner;
 		this.toolBar.setActions(prepareActions(this.getActions()), prepareActions(this.getSecondaryActions()))();
@@ -416,13 +439,16 @@ export abstract class CollapsibleViewletView extends CollapsibleView implements 
 		actionRunner: IActionRunner,
 		collapsed: boolean,
 		private viewName: string,
-		@IMessageService protected messageService: IMessageService,
-		@IContextMenuService protected contextMenuService: IContextMenuService
+		protected messageService: IMessageService,
+		private keybindingService: IKeybindingService,
+		protected contextMenuService: IContextMenuService,
+		headerSize?: number
 	) {
 		super({
 			minimumSize: 2 * 22,
 			initialState: collapsed ? CollapsibleState.COLLAPSED : CollapsibleState.EXPANDED,
-			ariaHeaderLabel: viewName
+			ariaHeaderLabel: viewName,
+			headerSize
 		});
 
 		this.actionRunner = actionRunner;
@@ -445,7 +471,8 @@ export abstract class CollapsibleViewletView extends CollapsibleView implements 
 		this.toolBar = new ToolBar($('div.actions').appendTo(container).getHTMLElement(), this.contextMenuService, {
 			orientation: ActionsOrientation.HORIZONTAL,
 			actionItemProvider: (action) => { return this.getActionItem(action); },
-			ariaLabel: nls.localize('viewToolbarAriaLabel', "{0} actions", this.viewName)
+			ariaLabel: nls.localize('viewToolbarAriaLabel', "{0} actions", this.viewName),
+			getKeyBinding: (action) => this.keybindingService.lookupKeybinding(action.id)
 		});
 		this.toolBar.actionRunner = this.actionRunner;
 		this.toolBar.setActions(prepareActions(this.getActions()), prepareActions(this.getSecondaryActions()))();
@@ -508,7 +535,9 @@ export abstract class CollapsibleViewletView extends CollapsibleView implements 
 		this.treeContainer = null;
 		this.tree.dispose();
 
-		this.dragHandler.dispose();
+		if (this.dragHandler) {
+			this.dragHandler.dispose();
+		}
 
 		this.toDispose = dispose(this.toDispose);
 
@@ -521,7 +550,7 @@ export abstract class CollapsibleViewletView extends CollapsibleView implements 
 }
 
 function renderViewTree(container: HTMLElement): HTMLElement {
-	let treeContainer = document.createElement('div');
+	const treeContainer = document.createElement('div');
 	container.appendChild(treeContainer);
 
 	return treeContainer;
@@ -551,7 +580,7 @@ function focus(tree: ITree): void {
 	}
 
 	// Make sure the current selected element is revealed
-	let selection = tree.getSelection();
+	const selection = tree.getSelection();
 	if (selection.length > 0) {
 		reveal(tree, selection[0], 0.5).done(null, errors.onUnexpectedError);
 	}

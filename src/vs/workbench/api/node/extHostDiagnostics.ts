@@ -4,24 +4,26 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {Remotable, IThreadService} from 'vs/platform/thread/common/thread';
-import {IMarkerService, IMarkerData} from 'vs/platform/markers/common/markers';
+import { localize } from 'vs/nls';
+import { IThreadService } from 'vs/workbench/services/thread/common/threadService';
+import { IMarkerData } from 'vs/platform/markers/common/markers';
 import URI from 'vs/base/common/uri';
-import {TPromise} from 'vs/base/common/winjs.base';
 import Severity from 'vs/base/common/severity';
 import * as vscode from 'vscode';
+import { MainContext, MainThreadDiagnosticsShape, ExtHostDiagnosticsShape } from './extHost.protocol';
+import { DiagnosticSeverity } from './extHostTypes';
 
 export class DiagnosticCollection implements vscode.DiagnosticCollection {
 
-	private static _maxDiagnosticsPerFile: number = 250;
+	private static readonly _maxDiagnosticsPerFile: number = 250;
 
-	private _name: string;
-	private _proxy: MainThreadDiagnostics;
+	private readonly _name: string;
 
+	private _proxy: MainThreadDiagnosticsShape;
 	private _isDisposed = false;
-	private _data: {[uri:string]: vscode.Diagnostic[]} = Object.create(null);
+	private _data = new Map<string, vscode.Diagnostic[]>();
 
-	constructor(name: string, proxy: MainThreadDiagnostics) {
+	constructor(name: string, proxy: MainThreadDiagnosticsShape) {
 		this._name = name;
 		this._proxy = proxy;
 	}
@@ -64,26 +66,36 @@ export class DiagnosticCollection implements vscode.DiagnosticCollection {
 			}
 
 			// update single row
-			this._data[first.toString()] = diagnostics;
+			this._data.set(first.toString(), diagnostics);
 			toSync = [first];
 
 		} else if (Array.isArray(first)) {
 			// update many rows
 			toSync = [];
-			for (let entry of first) {
-				let [uri, diagnostics] = entry;
-				toSync.push(uri);
+			let lastUri: vscode.Uri;
+
+			// ensure stable-sort: keep the original
+			// index for otherwise equal items
+			const sortedTuples = first
+				.map((tuple, idx) => ({ tuple, idx }))
+				.sort(DiagnosticCollection._compareIndexedTuplesByUri);
+
+			for (const {tuple} of sortedTuples) {
+				const [uri, diagnostics] = tuple;
+				if (!lastUri || uri.toString() !== lastUri.toString()) {
+					if (lastUri && this._data.get(lastUri.toString()).length === 0) {
+						this._data.delete(lastUri.toString());
+					}
+					lastUri = uri;
+					toSync.push(uri);
+					this._data.set(uri.toString(), []);
+				}
+
 				if (!diagnostics) {
 					// [Uri, undefined] means clear this
-					delete this._data[uri.toString()];
+					this._data.get(uri.toString()).length = 0;
 				} else {
-					// set or merge diagnostics
-					let existing = this._data[uri.toString()];
-					if (existing) {
-						existing.push(...diagnostics);
-					} else {
-						this._data[uri.toString()] = diagnostics;
-					}
+					this._data.get(uri.toString()).push(...diagnostics);
 				}
 			}
 		}
@@ -92,18 +104,39 @@ export class DiagnosticCollection implements vscode.DiagnosticCollection {
 		const entries: [URI, IMarkerData[]][] = [];
 		for (let uri of toSync) {
 			let marker: IMarkerData[];
-			let diagnostics = this._data[uri.toString()];
+			let diagnostics = this._data.get(uri.toString());
 			if (diagnostics) {
 
 				// no more than 250 diagnostics per file
 				if (diagnostics.length > DiagnosticCollection._maxDiagnosticsPerFile) {
-					console.warn('diagnostics for %s will be capped to %d (actually is %d)', uri.toString(), DiagnosticCollection._maxDiagnosticsPerFile, diagnostics.length);
-					diagnostics = diagnostics.slice(0, DiagnosticCollection._maxDiagnosticsPerFile);
+					marker = [];
+					const order = [DiagnosticSeverity.Error, DiagnosticSeverity.Warning, DiagnosticSeverity.Information, DiagnosticSeverity.Hint];
+					orderLoop: for (let i = 0; i < 4; i++) {
+						for (let diagnostic of diagnostics) {
+							if (diagnostic.severity === order[i]) {
+								const len = marker.push(DiagnosticCollection._toMarkerData(diagnostic));
+								if (len === DiagnosticCollection._maxDiagnosticsPerFile) {
+									break orderLoop;
+								}
+							}
+						}
+					}
+
+					// add 'signal' marker for showing omitted errors/warnings
+					marker.push({
+						severity: Severity.Error,
+						message: localize({ key: 'limitHit', comment: ['amount of errors/warning skipped due to limits'] }, "Not showing {0} further errors and warnings.", diagnostics.length - DiagnosticCollection._maxDiagnosticsPerFile),
+						startLineNumber: marker[marker.length - 1].startLineNumber,
+						startColumn: marker[marker.length - 1].startColumn,
+						endLineNumber: marker[marker.length - 1].endLineNumber,
+						endColumn: marker[marker.length - 1].endColumn
+					});
+				} else {
+					marker = diagnostics.map(DiagnosticCollection._toMarkerData);
 				}
-				marker = diagnostics.map(DiagnosticCollection._toMarkerData);
 			}
 
-			entries.push([<URI> uri, marker]);
+			entries.push([<URI>uri, marker]);
 		}
 
 		this._proxy.$changeMany(this.name, entries);
@@ -111,35 +144,36 @@ export class DiagnosticCollection implements vscode.DiagnosticCollection {
 
 	delete(uri: vscode.Uri): void {
 		this._checkDisposed();
-		delete this._data[uri.toString()];
-		this._proxy.$changeMany(this.name, [[<URI> uri, undefined]]);
+		this._data.delete(uri.toString());
+		this._proxy.$changeMany(this.name, [[<URI>uri, undefined]]);
 	}
 
 	clear(): void {
 		this._checkDisposed();
-		this._data = Object.create(null);
+		this._data.clear();
 		this._proxy.$clear(this.name);
 	}
 
 	forEach(callback: (uri: URI, diagnostics: vscode.Diagnostic[], collection: DiagnosticCollection) => any, thisArg?: any): void {
 		this._checkDisposed();
-		for (let key in this._data) {
+		this._data.forEach((value, key) => {
 			let uri = URI.parse(key);
 			callback.apply(thisArg, [uri, this.get(uri), this]);
-		}
+		});
 	}
 
 	get(uri: URI): vscode.Diagnostic[] {
 		this._checkDisposed();
-		let result = this._data[uri.toString()];
+		let result = this._data.get(uri.toString());
 		if (Array.isArray(result)) {
-			return Object.freeze(result.slice(0));
+			return <vscode.Diagnostic[]>Object.freeze(result.slice(0));
 		}
+		return undefined;
 	}
 
 	has(uri: URI): boolean {
 		this._checkDisposed();
-		return Array.isArray(this._data[uri.toString()]);
+		return Array.isArray(this._data.get(uri.toString()));
 	}
 
 	private _checkDisposed() {
@@ -173,18 +207,32 @@ export class DiagnosticCollection implements vscode.DiagnosticCollection {
 			default: return Severity.Error;
 		}
 	}
+
+	private static _compareIndexedTuplesByUri(a: { tuple: [vscode.Uri, vscode.Diagnostic[]]; idx: number }, b: { tuple: [vscode.Uri, vscode.Diagnostic[]]; idx: number }): number {
+		if (a.tuple[0].toString() < b.tuple[0].toString()) {
+			return -1;
+		} else if (a.tuple[0].toString() > b.tuple[0].toString()) {
+			return 1;
+		} else if (a.idx < b.idx) {
+			return -1;
+		} else if (a.idx > b.idx) {
+			return 1;
+		} else {
+			return 0;
+		}
+	}
 }
 
-@Remotable.ExtHostContext('ExtHostDiagnostics')
-export class ExtHostDiagnostics {
+export class ExtHostDiagnostics extends ExtHostDiagnosticsShape {
 
 	private static _idPool: number = 0;
 
-	private _proxy: MainThreadDiagnostics;
+	private _proxy: MainThreadDiagnosticsShape;
 	private _collections: DiagnosticCollection[];
 
-	constructor(@IThreadService threadService: IThreadService) {
-		this._proxy = threadService.getRemotable(MainThreadDiagnostics);
+	constructor(threadService: IThreadService) {
+		super();
+		this._proxy = threadService.get(MainContext.MainThreadDiagnostics);
 		this._collections = [];
 	}
 
@@ -216,25 +264,3 @@ export class ExtHostDiagnostics {
 	}
 }
 
-@Remotable.MainContext('MainThreadDiagnostics')
-export class MainThreadDiagnostics {
-
-	private _markerService: IMarkerService;
-
-	constructor(@IMarkerService markerService: IMarkerService) {
-		this._markerService = markerService;
-	}
-
-	$changeMany(owner: string, entries: [URI, IMarkerData[]][]): TPromise<any> {
-		for (let entry of entries) {
-			let [uri, markers] = entry;
-			this._markerService.changeOne(owner, uri, markers);
-		}
-		return undefined;
-	}
-
-	$clear(owner: string): TPromise<any> {
-		this._markerService.changeAll(owner, undefined);
-		return undefined;
-	}
-}
